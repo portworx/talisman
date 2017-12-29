@@ -1,0 +1,53 @@
+apiVersion: portworx.com/v1alpha1
+type: Cluster
+metadata:
+  name: px-demo
+  namespace: kube-system
+spec:
+  version: portworx/px-enterprise:1.2.12.0
+  kvdb:
+    endpoints:
+    - etcd://<ETCD_NODE1_IP>:<ETCD_NODE1_PORT>
+    - etcd://<ETCD_NODE2_IP>:<ETCD_NODE2_PORT>
+    - etcd://<ETCD_NODE3_IP>:<ETCD_NODE3_PORT>
+  network:
+    data: eth1
+    mgmt: eth2
+  storage:
+    devices:
+    - /dev/sdb
+    - /dev/sdc
+  placement:
+    # https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#node-affinity-beta-feature
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node_type
+            operator: In
+            values:
+            - worker
+  logging:
+    fluentd: 
+      s3:
+        s3_bucket: <base64encoded_val>
+        s3_region: <base64encoded_val>
+        aws_key_id: <base64encoded_val>
+        aws_secrey_key_id: <base64encoded_val>
+  nodes:
+  - name: "minion-1"
+    network:
+      data: eth3
+      mgmt: eth4
+    storage:
+      devices:
+      - /dev/sdd
+      - /dev/sde
+  - name: "minion-2"
+    storage:
+      devices:
+      - /dev/sdf
+      - /dev/sdg
+  env: 
+  - name: FOO
+    value: BAR
