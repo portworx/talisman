@@ -1,35 +1,39 @@
 package px
 
 import (
-	portworx "github.com/portworx/talisman/pkg/apis/portworx.com"
-	"github.com/portworx/talisman/pkg/cluster"
+	apiv1alpha1 "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
 	"github.com/sirupsen/logrus"
 )
 
 type pxCluster struct {
 }
 
-func (p *pxCluster) Create(obj interface{}) error {
-	logrus.Infof("creating a new portworx cluster")
-	// TODO add gatekeeper check to ensure only one cluster is running
+// Cluster an interface to manage a storage cluster
+type Cluster interface {
+	// Create creates the given cluster
+	Create(c *apiv1alpha1.Cluster) error
+	// Upgrade upgrades the given cluster
+	Upgrade(c *apiv1alpha1.Cluster) error
+	// Destory destroys all components of the given cluster
+	Destroy(c *apiv1alpha1.Cluster) error
+}
+
+func (p *pxCluster) Create(c *apiv1alpha1.Cluster) error {
+	logrus.Infof("creating a new portworx cluster: %s", c.Name)
 	return nil
 }
 
-func (p *pxCluster) Upgrade(new interface{}) error {
-	logrus.Infof("upgrading px cluster")
+func (p *pxCluster) Upgrade(c *apiv1alpha1.Cluster) error {
+	logrus.Infof("upgrading px cluster: %s", c.Name)
 	return nil
 }
 
-func (p *pxCluster) Destroy(obj interface{}) error {
-	logrus.Infof("destroying px cluster")
+func (p *pxCluster) Destroy(c *apiv1alpha1.Cluster) error {
+	logrus.Infof("destroying px cluster: %s", c.Name)
 	return nil
 }
 
 // NewPXClusterProvider creates a new PX cluster
-func NewPXClusterProvider(conf interface{}) (cluster.Cluster, error) {
+func NewPXClusterProvider(conf interface{}) (Cluster, error) {
 	return &pxCluster{}, nil
-}
-
-func init() {
-	cluster.Register(portworx.GroupName, NewPXClusterProvider)
 }
