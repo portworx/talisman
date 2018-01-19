@@ -12,9 +12,7 @@ import (
 	samplescheme "github.com/portworx/talisman/pkg/client/clientset/versioned/scheme"
 	informers "github.com/portworx/talisman/pkg/client/informers/externalversions"
 	listers "github.com/portworx/talisman/pkg/client/listers/portworx.com/v1alpha1"
-	"github.com/portworx/talisman/pkg/cluster"
-	// blank import to ensure px cluster provider gets registered
-	_ "github.com/portworx/talisman/pkg/cluster/px"
+	"github.com/portworx/talisman/pkg/cluster/px"
 	"github.com/portworx/talisman/pkg/crd"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
@@ -61,7 +59,7 @@ type Controller struct {
 
 	clustersLister  listers.ClusterLister
 	clustersSynced  cache.InformerSynced
-	clusterProvider cluster.Cluster
+	clusterProvider px.Cluster
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
 	// means we can ensure we only process a fixed amount of resources at a
@@ -105,7 +103,7 @@ func New(
 		},
 	}
 
-	clusterProvider, err := cluster.Get(portworx.GroupName, nil)
+	clusterProvider, err := px.NewPXClusterProvider(nil)
 	if err != nil {
 		logrus.Fatalf("failed to fetch cluster provider. Err: %v", err)
 	}

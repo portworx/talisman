@@ -4,7 +4,7 @@ metadata:
   name: px-demo
   namespace: kube-system
 spec:
-  version: portworx/px-enterprise:1.2.12.0
+  pxVersion: portworx/px-enterprise:1.2.12.0
   kvdb:
     endpoints:
     - etcd://<ETCD_NODE1_IP>:<ETCD_NODE1_PORT>
@@ -27,27 +27,6 @@ spec:
             operator: In
             values:
             - worker
-  logging:
-    fluentd: 
-      s3:
-        s3_bucket: <base64encoded_val>
-        s3_region: <base64encoded_val>
-        aws_key_id: <base64encoded_val>
-        aws_secrey_key_id: <base64encoded_val>
-  nodes:
-  - name: "minion-1"
-    network:
-      data: eth3
-      mgmt: eth4
-    storage:
-      devices:
-      - /dev/sdd
-      - /dev/sde
-  - name: "minion-2"
-    storage:
-      devices:
-      - /dev/sdf
-      - /dev/sdg
-  env: 
+  env:
   - name: FOO
     value: BAR
