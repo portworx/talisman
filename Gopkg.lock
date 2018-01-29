@@ -143,6 +143,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/libopenstorage/openstorage"
+  packages = ["api"]
+  revision = "d0227010079b8f7b87bf5ed787fd227914b74034"
+
+[[projects]]
+  branch = "master"
   name = "github.com/mailru/easyjson"
   packages = [
     "buffer",
@@ -150,6 +156,12 @@
     "jwriter"
   ]
   revision = "32fa128f234d041f196a9f3e0fea5ac9772c08e1"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mohae/deepcopy"
+  packages = ["."]
+  revision = "c48cc78d482608239f6c4c92a4abd87eb8761c90"
 
 [[projects]]
   branch = "master"
@@ -455,6 +467,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c85bb0834bede856377476b3f9b5e4371dbf9110fc09394c21575a66b2e512ae"
+  inputs-digest = "7c984ac58017bcdc4403c5de2de7519bb5a61cad475c7149e7fac045daa52444"
   solver-name = "gps-cdcl"
   solver-version = 1

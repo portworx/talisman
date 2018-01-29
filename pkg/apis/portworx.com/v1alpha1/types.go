@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"github.com/libopenstorage/openstorage/api"
 	"k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -57,6 +58,28 @@ type KvdbSpec struct {
 	CertificateSecret string `json:"certificateSecret,omitempty"`
 	// ACLTokenSecret is the secret name containing the ACL token for consul auth
 	ACLTokenSecret string `json:"aclTokenSecret,omitempty"`
+}
+
+// ClusterStatus is the status of the Portworx cluster
+type ClusterStatus struct {
+	StatusInfo
+	Name         string       `json:"name,omitempty"`
+	NodeStatuses []NodeStatus `json:"nodeStatuses,omitempty"`
+}
+
+// NodeStatus represents status of a cluster node
+type NodeStatus struct {
+	StatusInfo
+	Name string `json:"name,omitempty"`
+}
+
+// StatusInfo is used to represent the status of any entity in the cluster
+type StatusInfo struct {
+	Ready bool       `json:"ready"`
+	Code  api.Status `json:"code"`
+	// The following follow the same definition as PodStatus
+	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // NodeNetwork specifies which network interfaces the Node should use for data

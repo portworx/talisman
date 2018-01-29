@@ -12,6 +12,8 @@ type pxCluster struct {
 type Cluster interface {
 	// Create creates the given cluster
 	Create(c *apiv1alpha1.Cluster) error
+	// Status returns the current status of the given cluster
+	Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error)
 	// Upgrade upgrades the given cluster
 	Upgrade(c *apiv1alpha1.Cluster) error
 	// Destory destroys all components of the given cluster
@@ -21,6 +23,10 @@ type Cluster interface {
 func (p *pxCluster) Create(c *apiv1alpha1.Cluster) error {
 	logrus.Infof("creating a new portworx cluster: %s", c.Name)
 	return nil
+}
+
+func (p *pxCluster) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error) {
+	return nil, nil
 }
 
 func (p *pxCluster) Upgrade(c *apiv1alpha1.Cluster) error {
