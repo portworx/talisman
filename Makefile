@@ -61,7 +61,7 @@ name:
 package:
 	@echo $(PACKAGE)
 
-operator: vendor codegen
+operator: codegen
 	mkdir -p $(BIN)
 	go build $(LDFLAGS) -o $(BIN)/$(APP_NAME) cmd/operator/main.go
 
