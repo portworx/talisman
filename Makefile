@@ -3,17 +3,17 @@
 #          https://raw.githubusercontent.com/lpabon/quartermaster/dev/Makefile
 #
 
-.PHONY: version all operator run clean container deploy
+.PHONY: version all operator run clean container deploy talisman
 
-OPERATOR_IMG=$(DOCKER_HUB_REPO)/$(DOCKER_HUB_OPERATOR_IMAGE):$(DOCKER_HUB_TAG)
+DOCKER_HUB_TAG ?= latest
+DOCKER_PULLER_IMG=$(DOCKER_HUB_REPO)/docker-puller:$(DOCKER_HUB_TAG)
+TALISMAN_IMG=$(DOCKER_HUB_REPO)/talisman:$(DOCKER_HUB_TAG)
 
-APP_NAME := operator
 SHA := $(shell git rev-parse --short HEAD)
 BRANCH := $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
 VER := $(shell git rev-parse --short HEAD)
 ARCH := $(shell go env GOARCH)
 GOOS := $(shell go env GOOS)
-+GLIDEPATH := $(shell command -v glide 2> /dev/null)
 DIR=.
 
 ifndef TAGS
@@ -34,9 +34,8 @@ endif
 GO=go
 
 # Sources and Targets
-EXECUTABLES :=$(APP_NAME)
 # Build Binaries setting main.version and main.build vars
-LDFLAGS :=-ldflags "-X main.PX_OPERATOR_VERSION=$(VERSION) -extldflags '-z relro -z now'"
+LDFLAGS :=-ldflags "-X github.com/portworx/talisman/pkg/version.Version=$(VERSION) -extldflags '-z relro -z now'"
 PKGS=$(shell go list ./... | grep -v vendor)
 GOVET_PKGS=$(shell  go list ./... | grep -v vendor | grep -v pkg/client/informers/externalversions | grep -v versioned)
 
@@ -47,31 +46,26 @@ GOFMT := gofmt
 
 .DEFAULT: all
 
-all: clean pretest operator
+all: clean pretest operator talisman
 
 # print the version
 version:
 	@echo $(VERSION)
 
-# print the name of the app
-name:
-	@echo $(APP_NAME)
-
-# print the package path
-package:
-	@echo $(PACKAGE)
-
 operator: codegen
 	mkdir -p $(BIN)
-	go build $(LDFLAGS) -o $(BIN)/$(APP_NAME) cmd/operator/main.go
+	go build $(LDFLAGS) -o $(BIN)/operator cmd/operator/main.go
 
-run: operator
-	$(BIN)/$(APP_NAME)
+talisman: codegen
+	mkdir -p $(BIN)
+	go build $(LDFLAGS) -o $(BIN)/talisman cmd/talisman/talisman.go
 
 test:
 	go test -tags "$(TAGS)" $(TESTFLAGS) $(PKGS)
 
-
+docker-puller:
+	sudo docker build -t $(DOCKER_PULLER_IMG) cmd/docker-puller/
+	sudo docker push $(DOCKER_PULLER_IMG)
 
 fmt:
 	@echo "Performing gofmt on following: $(PKGS)"
@@ -116,21 +110,19 @@ verifycodegen:
 pretest: checkfmt vet lint errcheck verifycodegen
 
 container:
-	@echo "Building container: docker build --tag $(OPERATOR_IMG) -f Dockerfile ."
-	sudo docker build --tag $(OPERATOR_IMG) -f Dockerfile .
+	sudo docker build --tag $(TALISMAN_IMG) -f Dockerfile.talisman .
+	sudo docker build --tag $(DOCKER_PULLER_IMG) cmd/docker-puller/
 
 deploy: container
-	sudo docker push $(OPERATOR_IMG)
+	sudo docker push $(TALISMAN_IMG)
+	sudo docker push $(DOCKER_PULLER_IMG)
 
 docker-build:
 	docker build -t px/docker-build -f Dockerfile.build .
-	@echo "Building px operator using docker"
+	@echo "Building using docker"
 	docker run \
 		--privileged \
 		-v $(shell pwd):/go/src/github.com/portworx/talisman \
-		-e DOCKER_HUB_REPO=$(DOCKER_HUB_REPO) \
-		-e DOCKER_HUB_TORPEDO_IMAGE=$(DOCKER_HUB_TORPEDO_IMAGE) \
-		-e DOCKER_HUB_TAG=$(DOCKER_HUB_TAG) \
 		px/docker-build make all
 
 .PHONY: test clean name run version
@@ -138,6 +130,7 @@ docker-build:
 clean:
 	@echo Cleaning Workspace...
 	-sudo rm -rf $(BIN)
-	@echo "Deleting image "$(OPERATOR_IMG)
 	-docker rmi -f $(OPERATOR_IMG)
+	-docker rmi -f $(DOCKER_PULLER_IMG)
+	-docker rmi -f $(TALISMAN_IMG)
 	go clean -i $(PKGS)

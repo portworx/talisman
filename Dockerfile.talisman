@@ -1,0 +1,7 @@
+FROM fedora
+
+ADD bin/talisman /usr/local/bin
+
+# Define default command.
+ENTRYPOINT ["/usr/local/bin/talisman"]
+CMD []

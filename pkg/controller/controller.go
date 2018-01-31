@@ -103,7 +103,7 @@ func New(
 		},
 	}
 
-	clusterProvider, err := px.NewPXClusterProvider(nil)
+	clusterProvider, err := px.NewPXClusterProvider("")
 	if err != nil {
 		logrus.Fatalf("failed to fetch cluster provider. Err: %v", err)
 	}

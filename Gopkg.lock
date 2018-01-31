@@ -131,6 +131,18 @@
   revision = "0a025b7e63adc15a622f29b0b2c4c3848243bbf6"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/howeyc/gopass"
+  packages = ["."]
+  revision = "bf9dde6d0d2c004a008c27aaee91170c786f6db8"
+
+[[projects]]
+  name = "github.com/imdario/mergo"
+  packages = ["."]
+  revision = "163f41321a19dd09362d4c63cc2489db2015f1f4"
+  version = "0.3.2"
+
+[[projects]]
   name = "github.com/json-iterator/go"
   packages = ["."]
   revision = "96fcb84835b0447f3de9d7addb313c5487071533"
@@ -140,6 +152,15 @@
   packages = ["."]
   revision = "59fac5042749a5afb9af70e813da1dd5474f0167"
   version = "1.0.1"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/kubernetes-incubator/external-storage"
+  packages = [
+    "snapshot/pkg/apis/crd/v1",
+    "snapshot/pkg/client"
+  ]
+  revision = "0c97204ba6ec839db94ec1beff590200eb673d52"
 
 [[projects]]
   branch = "master"
@@ -174,6 +195,15 @@
   name = "github.com/peterbourgon/diskv"
   packages = ["."]
   revision = "2973218375c3d13162e1d3afe1708aaee318ef3f"
+
+[[projects]]
+  branch = "dsvalidate"
+  name = "github.com/portworx/sched-ops"
+  packages = [
+    "k8s",
+    "task"
+  ]
+  revision = "09ce24116fda204d17c9f1181c5b36f39e6718ed"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
@@ -290,8 +320,10 @@
   revision = "cc6478d1f0cc11882137b67e8137d387e68ce63a"
 
 [[projects]]
+  branch = "release-1.8"
   name = "k8s.io/apimachinery"
   packages = [
+    "pkg/api/equality",
     "pkg/api/errors",
     "pkg/api/meta",
     "pkg/api/resource",
@@ -301,6 +333,7 @@
     "pkg/apis/meta/v1alpha1",
     "pkg/conversion",
     "pkg/conversion/queryparams",
+    "pkg/conversion/unstructured",
     "pkg/fields",
     "pkg/labels",
     "pkg/runtime",
@@ -334,7 +367,7 @@
     "third_party/forked/golang/json",
     "third_party/forked/golang/reflect"
   ]
-  revision = "20bbfef868144faf29af69ddb2f01646ead5c1a1"
+  revision = "4972c8e335e32ab65ba45bde0a99c6544c8a8e4c"
 
 [[projects]]
   name = "k8s.io/client-go"
@@ -439,8 +472,12 @@
     "rest",
     "rest/watch",
     "testing",
+    "tools/auth",
     "tools/cache",
+    "tools/clientcmd",
     "tools/clientcmd/api",
+    "tools/clientcmd/api/latest",
+    "tools/clientcmd/api/v1",
     "tools/leaderelection",
     "tools/leaderelection/resourcelock",
     "tools/metrics",
@@ -451,6 +488,7 @@
     "util/buffer",
     "util/cert",
     "util/flowcontrol",
+    "util/homedir",
     "util/integer",
     "util/workqueue"
   ]
@@ -458,15 +496,12 @@
 
 [[projects]]
   name = "k8s.io/kube-openapi"
-  packages = [
-    "pkg/common",
-    "pkg/util/proto"
-  ]
+  packages = ["pkg/common"]
   revision = "b16ebc07f5cad97831f961e4b5a9cc1caed33b7e"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7c984ac58017bcdc4403c5de2de7519bb5a61cad475c7149e7fac045daa52444"
+  inputs-digest = "7ab7018b1481777e4e9e59482c1455ace4efcf030aa08904bf4b8b45173bb357"
   solver-name = "gps-cdcl"
   solver-version = 1
