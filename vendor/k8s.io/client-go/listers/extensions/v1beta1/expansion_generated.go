@@ -37,3 +37,7 @@ type ScaleListerExpansion interface{}
 // ScaleNamespaceListerExpansion allows custom methods to be added to
 // ScaleNamespaceLister.
 type ScaleNamespaceListerExpansion interface{}
+
+// ThirdPartyResourceListerExpansion allows custom methods to be added to
+// ThirdPartyResourceLister.
+type ThirdPartyResourceListerExpansion interface{}

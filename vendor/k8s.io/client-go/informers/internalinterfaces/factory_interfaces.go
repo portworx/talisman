@@ -19,7 +19,6 @@ limitations under the License.
 package internalinterfaces
 
 import (
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	kubernetes "k8s.io/client-go/kubernetes"
 	cache "k8s.io/client-go/tools/cache"
@@ -33,5 +32,3 @@ type SharedInformerFactory interface {
 	Start(stopCh <-chan struct{})
 	InformerFor(obj runtime.Object, newFunc NewInformerFunc) cache.SharedIndexInformer
 }
-
-type TweakListOptionsFunc func(*v1.ListOptions)
