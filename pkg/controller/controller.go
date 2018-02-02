@@ -103,7 +103,9 @@ func New(
 		},
 	}
 
-	clusterProvider, err := px.NewPXClusterProvider(nil)
+	clusterProvider, err := px.NewPXClusterProvider(
+		"", /* currently, we don't support docker registry secret through operator */
+		"" /* kubeconfig will always be in cluster config for operator*/)
 	if err != nil {
 		logrus.Fatalf("failed to fetch cluster provider. Err: %v", err)
 	}

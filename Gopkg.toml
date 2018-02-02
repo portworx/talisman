@@ -33,6 +33,9 @@
   name = "github.com/sirupsen/logrus"
   version = "1.0.4"
 
+[[constraint]]
+  name = "k8s.io/apimachinery"
+  branch = "release-1.8"
 [prune]
   go-tests = true
   unused-packages = true
