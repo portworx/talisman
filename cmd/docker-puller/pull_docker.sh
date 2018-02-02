@@ -18,12 +18,10 @@ cleanup ()
 }
 
 sleep_forever() {
-	while [ 1 ]
-  do
+  while : ; do
     sleep 60 &
     wait $!
   done
-
 }
 
 trap cleanup SIGINT SIGTERM

@@ -40,11 +40,14 @@ type Cluster interface {
 }
 
 // NewPXClusterProvider creates a new PX cluster
-func NewPXClusterProvider(dockerRegistrySecret string) (Cluster, error) {
+func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, error) {
 	var cfg *rest.Config
 	var err error
 
-	kubeconfig := os.Getenv("KUBECONFIG")
+	if len(kubeconfig) == 0 {
+		kubeconfig = os.Getenv("KUBECONFIG")
+	}
+
 	if len(kubeconfig) > 0 {
 		logrus.Debugf("using kubeconfig: %s to create k8s client", kubeconfig)
 		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
@@ -57,7 +60,11 @@ func NewPXClusterProvider(dockerRegistrySecret string) (Cluster, error) {
 		return nil, fmt.Errorf("Error building kubeconfig: %s", err.Error())
 	}
 
-	kubeClient := kubernetes.NewForConfigOrDie(cfg)
+	kubeClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	return &pxClusterOps{
 		kubeClient:           kubeClient,
 		k8sOps:               k8s.Instance(),
@@ -200,6 +207,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 		},
 	}
 
+	// Cleanup any lingering DaemonSet for docker-pull if it exists
 	policy := metav1.DeletePropagationForeground
 	err := ops.kubeClient.Extensions().DaemonSets(pxDefaultNamespace).Delete(
 		pullerName,

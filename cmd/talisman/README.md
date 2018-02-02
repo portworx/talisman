@@ -1,9 +1,9 @@
 ### Running talisman
 
-To test talisman, you can use the talisman_job.yaml spec file in this directory.
+To test talisman, you can use the talisman_upgrade_job.yaml spec file in this directory.
 
 ```bash
-kubectl apply -f talisman_job.yaml
+kubectl apply -f talisman_upgrade_job.yaml
 ```
 
 This will start a [Job](https://kubernetes.io/docs/concepts/workloads/controllers/jobs-run-to-completion/).
