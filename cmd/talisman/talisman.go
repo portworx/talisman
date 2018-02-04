@@ -18,6 +18,9 @@ const (
 // command line arguments
 var (
 	newPXImage           string
+	newPXTag             string
+	newOCIMonImage       string
+	newOCIMonTag         string
 	op                   string
 	dockerRegistrySecret string
 	kubeconfig           string
@@ -40,8 +43,8 @@ func main() {
 }
 
 func doUpgrade() {
-	if len(newPXImage) == 0 {
-		logrus.Fatalf("error: no PX image specified for %s operation", op)
+	if len(newOCIMonTag) == 0 {
+		logrus.Fatalf("error: new OCI monitor tag not specified for %s operation", op)
 	}
 
 	inst, err := px.NewPXClusterProvider(dockerRegistrySecret, kubeconfig)
@@ -52,7 +55,10 @@ func doUpgrade() {
 	// Create a new spec for the PX cluster. Currently, only changing the PX version is supported.
 	newSpec := &v1alpha1.Cluster{
 		Spec: v1alpha1.ClusterSpec{
-			PXVersion: newPXImage,
+			OCIMonImage: newOCIMonImage,
+			OCIMonTag:   newOCIMonTag,
+			PXImage:     newPXImage,
+			PXTag:       newPXTag,
 		},
 	}
 	err = inst.Upgrade(newSpec)
@@ -63,7 +69,10 @@ func doUpgrade() {
 
 func init() {
 	flag.StringVar(&op, "operation", "upgrade", "Operation to perform for the Portworx cluster")
-	flag.StringVar(&newPXImage, "newimage", "", "New Portworx Image to use for the upgrade")
+	flag.StringVar(&newOCIMonTag, "ocimontag", "", "New OCI Monitor tag to use for the upgrade")
+	flag.StringVar(&newOCIMonImage, "ocimonimage", "portworx/oci-monitor", "(optional) New OCI Monitor Image to use for the upgrade")
+	flag.StringVar(&newPXImage, "pximage", "", "(optional) New Portworx Image to use for the upgrade")
+	flag.StringVar(&newPXTag, "pxtag", "", "(optional) New Portworx tag to use for the upgrade")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "(optional) Absolute path of the kubeconfig file")
 	flag.StringVar(&dockerRegistrySecret, "dockerregsecret", "", "(optional) Kubernetes Secret to pull docker images from a private registry")
 }

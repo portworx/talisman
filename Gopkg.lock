@@ -179,7 +179,12 @@
 [[projects]]
   branch = "master"
   name = "github.com/libopenstorage/openstorage"
-  packages = ["api"]
+  packages = [
+    "api",
+    "api/client",
+    "api/client/volume",
+    "volume"
+  ]
   revision = "7611cb033cadf5ee28d16c83c8cb7bd13f2e1091"
 
 [[projects]]
@@ -217,7 +222,7 @@
     "k8s",
     "task"
   ]
-  revision = "5b6644e1c0d7cb1d08a918e77169daa991e69a8c"
+  revision = "ba6902bf86104d94e4224cbf65b03f19a4cb7c73"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
@@ -506,6 +511,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "d0ce43235b850e2d07d5c93f727286b1333130adf16755ca483e50ebf46cdd19"
+  inputs-digest = "7765b65068b973a559d18e21a3db51213f5e62a87da4a8812fe912f09a1b7f35"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -10,17 +10,6 @@ metadata:
    name: talisman-role
 rules:
 - apiGroups:
-  - extensions
-  resources:
-  - deployments
-  - daemonsets
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - delete
-- apiGroups:
   - apps
   resources:
   - daemonsets
@@ -38,6 +27,8 @@ rules:
   resources:
   - pods
   - persistentvolumeclaims
+  - services
+  - nodes
   verbs:
   - get
   - list
@@ -76,5 +67,5 @@ spec:
       containers:
       - name: talisman
         image: portworx/talisman:latest
-        args: ["-operation",  "upgrade", "-newimage", "portworx/px-enterprise:1.3.0-rc3"]
+        args: ["-operation",  "upgrade", "-ocimonimage", "portworx/oci-monitor", "-ocimontag" ,"1.3.0-rc3"]
       restartPolicy: Never
