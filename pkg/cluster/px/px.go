@@ -282,6 +282,8 @@ func (ops *pxClusterOps) scaleSharedAppsToZero() error {
 			}
 
 			dCopy = dCopy.DeepCopy()
+
+			// save current replica count in annotations so it can be used later on to restore the replicas
 			dCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *dCopy.Spec.Replicas)
 			dCopy.Spec.Replicas = &valZero
 
@@ -312,6 +314,7 @@ func (ops *pxClusterOps) scaleSharedAppsToZero() error {
 			}
 
 			sCopy = sCopy.DeepCopy()
+			// save current replica count in annotations so it can be used later on to restore the replicas
 			sCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *sCopy.Spec.Replicas)
 			sCopy.Spec.Replicas = &valZero
 
@@ -360,6 +363,7 @@ func (ops *pxClusterOps) restoreScaledAppsReplicas() error {
 
 			val, present := dCopy.Annotations[replicaMemoryKey]
 			if !present || len(val) == 0 {
+				logrus.Infof("not restoring app: [%s] %s as no annotation found to track replica count", deploymentNamespace, deploymentName)
 				return nil, false, nil // done as this is not an app we touched
 			}
 
