@@ -1,9 +1,12 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1beta2
 kind: DaemonSet
 metadata:
   name: docker-puller
   namespace: kube-system
 spec:
+  selector:
+    matchLabels:
+      name: docker-puller
   template:
     metadata:
       labels:

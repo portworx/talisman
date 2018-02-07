@@ -31,9 +31,18 @@ type ClusterList struct {
 type ClusterSpec struct {
 	// Kvdb is the key value store configuration
 	Kvdb KvdbSpec `json:"kvdb"`
-	// PXVersion is the Portworx version/image to use on all nodes of the cluster.
+	// PXImage is the Portworx image to use on all nodes of the cluster.
 	// +optional
-	PXVersion string `json:"pxVersion,omitempty"`
+	PXImage string `json:"pxImage,omitempty"`
+	// PXTag is the Portworx docker image tag
+	// +optional
+	PXTag string `json:"pxTag"`
+	// OCIMonImage is the docker image for OCI monitor that runs on each k8s node
+	// +optional
+	OCIMonImage string `json:"ociMonImage"`
+	// OCIMonTag is the docker tag for OCI monitor
+	// +optional
+	OCIMonTag string `json:"ociMonTag"`
 	// Network specifies the networking setting to be used for all nodes. This
 	// can be overridden by individual nodes in the NodeSpec
 	Network NodeNetwork `json:"network,omitempty"`
