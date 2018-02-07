@@ -15,7 +15,9 @@ import (
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
+	batch_v1 "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
+	rbac_v1 "k8s.io/api/rbac/v1"
 	storage_api "k8s.io/api/storage/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -37,8 +39,9 @@ const (
 	nodeUpdateTimeout        = 1 * time.Minute
 	nodeUpdateRetryInterval  = 2 * time.Second
 	deploymentReadyTimeout   = 10 * time.Minute
-	daemonsetReadyTimeout    = 20 * time.Minute
 )
+
+var deleteForegroundPolicy = meta_v1.DeletePropagationForeground
 
 var (
 	// ErrPodsNotFound error returned when pod or pods could not be found
@@ -52,7 +55,9 @@ type Ops interface {
 	ServiceOps
 	StatefulSetOps
 	DeploymentOps
+	JobOps
 	DaemonSetOps
+	RBACOps
 	PodOps
 	StorageClassOps
 	PersistentVolumeClaimOps
@@ -160,6 +165,37 @@ type DaemonSetOps interface {
 	GetDaemonSetPods(*apps_api.DaemonSet) ([]v1.Pod, error)
 	// UpdateDaemonSet updates the given daemon set
 	UpdateDaemonSet(*apps_api.DaemonSet) error
+}
+
+// JobOps is an interface to perform job operations
+type JobOps interface {
+	// CreateJob creates the given job
+	CreateJob(job *batch_v1.Job) (*batch_v1.Job, error)
+	// GetJob returns the job from given namespace and name
+	GetJob(name, namespace string) (*batch_v1.Job, error)
+	// DeleteJob deletes the job with given namespace and name
+	DeleteJob(name, namespace string) error
+	// ValidateJob validates if the job with given namespace and name succeeds.
+	//     It waits for timeout duration for job to succeed
+	ValidateJob(name, namespace string, timeout time.Duration) error
+}
+
+// RBACOps is an interface to perform RBAC operations
+type RBACOps interface {
+	// CreateClusterRole creates the given cluster role
+	CreateClusterRole(role *rbac_v1.ClusterRole) (*rbac_v1.ClusterRole, error)
+	// UpdateClusterRole updates the given cluster role
+	UpdateClusterRole(role *rbac_v1.ClusterRole) (*rbac_v1.ClusterRole, error)
+	// CreateClusterRoleBinding creates the given cluster role binding
+	CreateClusterRoleBinding(role *rbac_v1.ClusterRoleBinding) (*rbac_v1.ClusterRoleBinding, error)
+	// CreateServiceAccount creates the given service account
+	CreateServiceAccount(account *v1.ServiceAccount) (*v1.ServiceAccount, error)
+	// DeleteClusterRole deletes the given cluster role
+	DeleteClusterRole(roleName string) error
+	// DeleteClusterRoleBinding deletes the given cluster role binding
+	DeleteClusterRoleBinding(roleName string) error
+	// DeleteServiceAccount deletes the given service account
+	DeleteServiceAccount(accountName, namespace string) error
 }
 
 // PodOps is an interface to perform k8s pod operations
@@ -692,9 +728,8 @@ func (k *k8sOps) DeleteService(service *v1.Service) error {
 		return err
 	}
 
-	policy := meta_v1.DeletePropagationForeground
 	return k.client.CoreV1().Services(service.Namespace).Delete(service.Name, &meta_v1.DeleteOptions{
-		PropagationPolicy: &policy,
+		PropagationPolicy: &deleteForegroundPolicy,
 	})
 }
 
@@ -764,9 +799,8 @@ func (k *k8sOps) DeleteDeployment(deployment *apps_api.Deployment) error {
 		return err
 	}
 
-	policy := meta_v1.DeletePropagationForeground
 	return k.appsClient().Deployments(deployment.Namespace).Delete(deployment.Name, &meta_v1.DeleteOptions{
-		PropagationPolicy: &policy,
+		PropagationPolicy: &deleteForegroundPolicy,
 	})
 }
 
@@ -1017,6 +1051,14 @@ func (k *k8sOps) ValidateDaemonSet(name, namespace string) error {
 			}
 		}
 
+		if ds.Status.DesiredNumberScheduled != ds.Status.UpdatedNumberScheduled {
+			return "", true, &ErrAppNotReady{
+				ID: name,
+				Cause: fmt.Sprintf("Not all pods are updated. Expected: %v Updated replicas: %v",
+					ds.Status.DesiredNumberScheduled, ds.Status.UpdatedNumberScheduled),
+			}
+		}
+
 		pods, err := k.GetDaemonSetPods(ds)
 		if err != nil || pods == nil {
 			return "", true, &ErrAppNotReady{
@@ -1052,6 +1094,12 @@ func (k *k8sOps) ValidateDaemonSet(name, namespace string) error {
 		}
 	}
 
+	nodes, err := k.GetNodes()
+	if err != nil {
+		return err
+	}
+
+	daemonsetReadyTimeout := time.Duration(len(nodes.Items)) * 10 * time.Minute
 	if _, err := task.DoRetryWithTimeout(t, daemonsetReadyTimeout, 10*time.Second); err != nil {
 		return err
 	}
@@ -1070,6 +1118,64 @@ func (k *k8sOps) UpdateDaemonSet(ds *apps_api.DaemonSet) error {
 }
 
 // DaemonSet APIs - END
+
+// Job APIs - BEGIN
+func (k *k8sOps) CreateJob(job *batch_v1.Job) (*batch_v1.Job, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Batch().Jobs(job.Namespace).Create(job)
+}
+
+func (k *k8sOps) GetJob(name, namespace string) (*batch_v1.Job, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Batch().Jobs(namespace).Get(name, meta_v1.GetOptions{})
+}
+
+func (k *k8sOps) DeleteJob(name, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Batch().Jobs(namespace).Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) ValidateJob(name, namespace string, timeout time.Duration) error {
+	t := func() (interface{}, bool, error) {
+		job, err := k.GetJob(namespace, name)
+		if err != nil {
+			return nil, true, err
+		}
+
+		if job.Status.Failed > 0 {
+			return nil, false, fmt.Errorf("job: [%s] %s has %d failed pod(s)", namespace, name, job.Status.Failed)
+		}
+
+		if job.Status.Active > 0 {
+			return nil, true, fmt.Errorf("job: [%s] %s still has %d active pod(s)", namespace, name, job.Status.Active)
+		}
+
+		if job.Status.Succeeded == 0 {
+			return nil, true, fmt.Errorf("job: [%s] %s no pod(s) that have succeeded", namespace, name)
+		}
+
+		return nil, false, nil
+	}
+
+	if _, err := task.DoRetryWithTimeout(t, timeout, 10*time.Second); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Job APIs - END
 
 // StatefulSet APIs - BEGIN
 
@@ -1091,9 +1197,8 @@ func (k *k8sOps) DeleteStatefulSet(statefulset *apps_api.StatefulSet) error {
 		return err
 	}
 
-	policy := meta_v1.DeletePropagationForeground
 	return k.appsClient().StatefulSets(statefulset.Namespace).Delete(statefulset.Name, &meta_v1.DeleteOptions{
-		PropagationPolicy: &policy,
+		PropagationPolicy: &deleteForegroundPolicy,
 	})
 }
 
@@ -1232,15 +1337,76 @@ func (k *k8sOps) GetStatefulSetsUsingStorageClass(scName string) ([]apps_api.Sta
 
 // StatefulSet APIs - END
 
+func (k *k8sOps) CreateClusterRole(role *rbac_v1.ClusterRole) (*rbac_v1.ClusterRole, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Rbac().ClusterRoles().Create(role)
+}
+
+func (k *k8sOps) UpdateClusterRole(role *rbac_v1.ClusterRole) (*rbac_v1.ClusterRole, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Rbac().ClusterRoles().Update(role)
+}
+
+func (k *k8sOps) CreateClusterRoleBinding(binding *rbac_v1.ClusterRoleBinding) (*rbac_v1.ClusterRoleBinding, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Rbac().ClusterRoleBindings().Create(binding)
+}
+
+func (k *k8sOps) CreateServiceAccount(account *v1.ServiceAccount) (*v1.ServiceAccount, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Core().ServiceAccounts(account.Namespace).Create(account)
+}
+
+func (k *k8sOps) DeleteClusterRole(roleName string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Rbac().ClusterRoles().Delete(roleName, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) DeleteClusterRoleBinding(bindingName string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Rbac().ClusterRoleBindings().Delete(bindingName, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) DeleteServiceAccount(accountName, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Core().ServiceAccounts(namespace).Delete(accountName, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
 func (k *k8sOps) DeletePods(pods []v1.Pod) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
 	}
 
-	deletePolicy := meta_v1.DeletePropagationForeground
 	for _, pod := range pods {
 		if err := k.client.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &meta_v1.DeleteOptions{
-			PropagationPolicy: &deletePolicy,
+			PropagationPolicy: &deleteForegroundPolicy,
 		}); err != nil {
 			return err
 		}

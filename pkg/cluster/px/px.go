@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -37,6 +38,7 @@ const (
 	replicaMemoryKey   = "px/replicas-before-scale-down"
 	pxdRestPort        = 9001
 	pxServiceName      = "portworx-service"
+	pxClusterRoleName  = "node-get-put-list-role"
 )
 
 type pxClusterOps struct {
@@ -662,6 +664,36 @@ func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.
 // upgradePX upgrades PX daemonsets and waits till all replicas are ready
 func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	var err error
+
+	// update RBAC cluster role
+	role := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pxClusterRoleName,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"nodes"},
+				Verbs:     []string{"get", "update", "list", "watch"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"get", "list", "delete"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"persistentvolumeclaims"},
+				Verbs:     []string{"get", "list"},
+			},
+		},
+	}
+
+	role, err = ops.k8sOps.UpdateClusterRole(role)
+	if err != nil {
+		return err
+	}
+
 	var dss []apps_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
