@@ -222,7 +222,7 @@
     "k8s",
     "task"
   ]
-  revision = "cb72ca58fba7d217d99720298d4e6f294aa514c0"
+  revision = "07ef49137b83a614eec1aa3a91bc5c4da4edc97d"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
@@ -511,6 +511,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "de238a9fca39623a2ea2f5a2c8685e8865a9610a394a56cd8ac3031f65763042"
+  inputs-digest = "ed878f1810d674479c37bdf799aef546ae1d0ef10e8e8adc5e6721906ee7a32d"
   solver-name = "gps-cdcl"
   solver-version = 1

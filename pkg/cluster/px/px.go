@@ -2,7 +2,6 @@ package px
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -15,16 +14,13 @@ import (
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
 	apiv1alpha1 "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
+	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 type pxInstallType string
@@ -47,19 +43,19 @@ const (
 )
 
 const (
-	defaultPXImage     = "portworx/px-enterprise"
-	pxDefaultNamespace = "kube-system"
-	dockerPullerImage  = "portworx/docker-puller:latest"
-	replicaMemoryKey   = "px/replicas-before-scale-down"
-	pxdRestPort        = 9001
-	pxServiceName      = "portworx-service"
-	pxClusterRoleName  = "node-get-put-list-role"
-	pxVersionLabel     = "PX Version"
+	defaultPXImage       = "portworx/px-enterprise"
+	pxDefaultNamespace   = "kube-system"
+	dockerPullerImage    = "portworx/docker-puller:latest"
+	pxdRestPort          = 9001
+	pxServiceName        = "portworx-service"
+	pxClusterRoleName    = "node-get-put-list-role"
+	pxVersionLabel       = "PX Version"
+	defaultRetryInterval = 10 * time.Second
 )
 
 type pxClusterOps struct {
-	kubeClient           kubernetes.Interface
 	k8sOps               k8s.Ops
+	utils                *k8sutils.Instance
 	dockerRegistrySecret string
 	clusterManager       cluster.Cluster
 	volDriver            volume.VolumeDriver
@@ -67,9 +63,6 @@ type pxClusterOps struct {
 
 // timeouts and intervals
 const (
-	deploymentUpdateTimeout       = 5 * time.Minute
-	statefulSetUpdateTimeout      = 10 * time.Minute
-	defaultRetryInterval          = 10 * time.Second
 	sharedVolDetachTimeout        = 5 * time.Minute
 	daemonsetUpdateTriggerTimeout = 5 * time.Minute
 	dockerPullerDeleteTimeout     = 5 * time.Minute
@@ -94,26 +87,7 @@ type Cluster interface {
 
 // NewPXClusterProvider creates a new PX cluster
 func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, error) {
-	var cfg *rest.Config
-	var err error
-
-	if len(kubeconfig) == 0 {
-		kubeconfig = os.Getenv("KUBECONFIG")
-	}
-
-	if len(kubeconfig) > 0 {
-		logrus.Debugf("using kubeconfig: %s to create k8s client", kubeconfig)
-		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		logrus.Debugf("will use in-cluster config to create k8s client", kubeconfig)
-		cfg, err = rest.InClusterConfig()
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("Error building kubeconfig: %s", err.Error())
-	}
-
-	kubeClient, err := kubernetes.NewForConfig(cfg)
+	utils, err := k8sutils.New(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
@@ -136,11 +110,11 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	}
 
 	return &pxClusterOps{
-		kubeClient:           kubeClient,
-		k8sOps:               k8sOps,
-		dockerRegistrySecret: dockerRegistrySecret,
 		volDriver:            volDriver,
 		clusterManager:       clusterManager,
+		k8sOps:               k8s.Instance(),
+		dockerRegistrySecret: dockerRegistrySecret,
+		utils:                utils,
 	}, nil
 }
 
@@ -196,7 +170,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 		return err
 	}
 
-	// 2. (Optional) Scale down px shared applications to 0 replicas for 1.2 => 1.3 upgrade
+	// 2. (Optional) Scale down px shared applications to 0 replicas if required based on opts
 	scaleDownSharedRequired, err := ops.isScaleDownOfSharedAppsRequired(new, opts)
 	if err != nil {
 		return err
@@ -204,13 +178,13 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 
 	if scaleDownSharedRequired {
 		defer func() { // always restore the replicas
-			err = ops.restoreScaledAppsReplicas()
+			err = ops.utils.RestoreScaledAppsReplicas()
 			if err != nil {
 				logrus.Errorf("failed to restore PX shared applications replicas. Err: %v", err)
 			}
 		}()
 
-		err = ops.scaleSharedAppsToZero()
+		err = ops.utils.ScaleSharedAppsToZero()
 		if err != nil {
 			return err
 		}
@@ -332,16 +306,13 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 	}
 
 	// Cleanup any lingering DaemonSet for docker-pull if it exists
-	policy := metav1.DeletePropagationForeground
-	err := ops.kubeClient.Apps().DaemonSets(pxDefaultNamespace).Delete(
-		pullerName,
-		&metav1.DeleteOptions{PropagationPolicy: &policy})
-	if err != nil && !isNotFoundErr(err) {
+	err := ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
+	if err != nil && !k8sutils.IsNotFoundErr(err) {
 		return err
 	}
 
 	t := func() (interface{}, bool, error) {
-		_, err = ops.kubeClient.Apps().DaemonSets(pxDefaultNamespace).Get(pullerName, metav1.GetOptions{})
+		_, err := ops.k8sOps.GetDaemonSet(pullerName, pxDefaultNamespace)
 		if err == nil {
 			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", pxDefaultNamespace, pullerName)
 		}
@@ -353,7 +324,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 		return err
 	}
 
-	ds, err = ops.kubeClient.Apps().DaemonSets(pxDefaultNamespace).Create(ds)
+	ds, err = ops.k8sOps.CreateDaemonSet(ds)
 	if err != nil {
 		return err
 	}
@@ -368,9 +339,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 
 	logrus.Infof("validated successfull run of docker puller: %s", ds.Name)
 
-	err = ops.kubeClient.Apps().DaemonSets(pxDefaultNamespace).Delete(
-		pullerName,
-		&metav1.DeleteOptions{PropagationPolicy: &policy})
+	err = ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
 	if err != nil {
 		logrus.Warnf("error while deleting docker puller: %v", err)
 		return err
@@ -379,247 +348,9 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 	return nil
 }
 
-func (ops *pxClusterOps) scaleSharedAppsToZero() error {
-	sharedDeps, sharedSS, err := ops.getPXSharedApps()
-	if err != nil {
-		return err
-	}
-
-	logrus.Infof("found %d deployments and %d statefulsets to scale down", len(sharedDeps), len(sharedSS))
-
-	var valZero int32
-	for _, d := range sharedDeps {
-		deploymentName := d.Name
-		deploymentNamespace := d.Namespace
-		logrus.Infof("scaling down deployment: [%s] %s", deploymentNamespace, deploymentName)
-
-		t := func() (interface{}, bool, error) {
-			dCopy, err := ops.kubeClient.Apps().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
-			if err != nil {
-				if isNotFoundErr(err) {
-					return nil, false, nil // done as deployment is deleted
-				}
-
-				return nil, true, err
-			}
-
-			if *dCopy.Spec.Replicas == 0 {
-				logrus.Infof("app [%s] %s is already scaled down to 0", dCopy.Namespace, dCopy.Name)
-				return nil, false, nil
-			}
-
-			dCopy = dCopy.DeepCopy()
-
-			// save current replica count in annotations so it can be used later on to restore the replicas
-			dCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *dCopy.Spec.Replicas)
-			dCopy.Spec.Replicas = &valZero
-
-			_, err = ops.kubeClient.Apps().Deployments(dCopy.Namespace).Update(dCopy)
-			if err != nil {
-				return nil, true, err
-			}
-
-			return nil, false, nil
-		}
-
-		if _, err := task.DoRetryWithTimeout(t, deploymentUpdateTimeout, defaultRetryInterval); err != nil {
-			return err
-		}
-	}
-
-	for _, s := range sharedSS {
-		logrus.Infof("scaling down statefulset: [%s] %s", s.Namespace, s.Name)
-
-		t := func() (interface{}, bool, error) {
-			sCopy, err := ops.kubeClient.Apps().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
-			if err != nil {
-				if isNotFoundErr(err) {
-					return nil, false, nil // done as statefulset is deleted
-				}
-
-				return nil, true, err
-			}
-
-			sCopy = sCopy.DeepCopy()
-			// save current replica count in annotations so it can be used later on to restore the replicas
-			sCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *sCopy.Spec.Replicas)
-			sCopy.Spec.Replicas = &valZero
-
-			_, err = ops.kubeClient.Apps().StatefulSets(sCopy.Namespace).Update(sCopy)
-			if err != nil {
-				return nil, true, err
-			}
-
-			return nil, false, nil
-		}
-
-		if _, err := task.DoRetryWithTimeout(t, statefulSetUpdateTimeout, defaultRetryInterval); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (ops *pxClusterOps) restoreScaledAppsReplicas() error {
-	sharedDeps, sharedSS, err := ops.getPXSharedApps()
-	if err != nil {
-		return err
-	}
-
-	logrus.Infof("found %d deployments and %d statefulsets to restore", len(sharedDeps), len(sharedSS))
-
-	for _, d := range sharedDeps {
-		deploymentName := d.Name
-		deploymentNamespace := d.Namespace
-		logrus.Infof("restoring app: [%s] %s", d.Namespace, d.Name)
-		t := func() (interface{}, bool, error) {
-			dCopy, err := ops.kubeClient.Apps().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
-			if err != nil {
-				if isNotFoundErr(err) {
-					return nil, false, nil // done as deployment is deleted
-				}
-
-				return nil, true, err
-			}
-
-			dCopy = dCopy.DeepCopy()
-			if dCopy.Annotations == nil {
-				return nil, false, nil // done as this is not an app we touched
-			}
-
-			val, present := dCopy.Annotations[replicaMemoryKey]
-			if !present || len(val) == 0 {
-				logrus.Infof("not restoring app: [%s] %s as no annotation found to track replica count", deploymentNamespace, deploymentName)
-				return nil, false, nil // done as this is not an app we touched
-			}
-
-			parsedVal := intstr.Parse(val)
-			if parsedVal.Type != intstr.Int {
-				return nil, false /*retry won't help */, fmt.Errorf("failed to parse saved replica count: %v", val)
-			}
-
-			delete(dCopy.Annotations, replicaMemoryKey)
-			dCopy.Spec.Replicas = &parsedVal.IntVal
-
-			_, err = ops.kubeClient.Apps().Deployments(dCopy.Namespace).Update(dCopy)
-			if err != nil {
-				return nil, true, err
-			}
-
-			return nil, false, nil
-		}
-
-		if _, err := task.DoRetryWithTimeout(t, deploymentUpdateTimeout, defaultRetryInterval); err != nil {
-			return err
-		}
-	}
-
-	for _, s := range sharedSS {
-		logrus.Infof("restoring app: [%s] %s", s.Namespace, s.Name)
-
-		t := func() (interface{}, bool, error) {
-			sCopy, err := ops.kubeClient.Apps().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
-			if err != nil {
-				if isNotFoundErr(err) {
-					return nil, false, nil // done as statefulset is deleted
-				}
-
-				return nil, true, err
-			}
-
-			sCopy = sCopy.DeepCopy()
-			if sCopy.Annotations == nil {
-				return nil, false, nil // done as this is not an app we touched
-			}
-
-			val, present := sCopy.Annotations[replicaMemoryKey]
-			if !present || len(val) == 0 {
-				return nil, false, nil // done as this is not an app we touched
-			}
-
-			parsedVal := intstr.Parse(val)
-			if parsedVal.Type != intstr.Int {
-				return nil, false, fmt.Errorf("failed to parse saved replica count: %v", val)
-			}
-
-			delete(sCopy.Annotations, replicaMemoryKey)
-			sCopy.Spec.Replicas = &parsedVal.IntVal
-
-			_, err = ops.kubeClient.Apps().StatefulSets(sCopy.Namespace).Update(sCopy)
-			if err != nil {
-				return nil, true, err
-			}
-
-			return nil, false, nil
-		}
-
-		if _, err := task.DoRetryWithTimeout(t, statefulSetUpdateTimeout, defaultRetryInterval); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// getPXSharedApps returns all deployments and statefulsets using Portworx storage class for shared volumes
-func (ops *pxClusterOps) getPXSharedApps() ([]apps_api.Deployment, []apps_api.StatefulSet, error) {
-	scs, err := ops.getPXSharedSCs()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var sharedDeps []apps_api.Deployment
-	var sharedSS []apps_api.StatefulSet
-	for _, sc := range scs {
-		deps, err := ops.k8sOps.GetDeploymentsUsingStorageClass(sc)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		for _, d := range deps {
-			sharedDeps = append(sharedDeps, d)
-		}
-
-		ss, err := ops.k8sOps.GetStatefulSetsUsingStorageClass(sc)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		for _, s := range ss {
-			sharedSS = append(sharedSS, s)
-		}
-	}
-
-	return sharedDeps, sharedSS, nil
-}
-
-// getPXSharedSCs returns all storage classes that have the shared parameter set to true
-func (ops *pxClusterOps) getPXSharedSCs() ([]string, error) {
-	scs, err := ops.kubeClient.Storage().StorageClasses().List(metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	var retList []string
-	for _, sc := range scs.Items {
-		params, err := ops.k8sOps.GetStorageClassParams(&sc)
-		if err != nil {
-			return nil, err
-		}
-
-		if isShared, present := params["shared"]; present && isShared == "true" {
-			retList = append(retList, sc.Name)
-		}
-
-	}
-
-	return retList, nil
-}
-
 // waitTillPXSharedVolumesDetached waits till all shared volumes are detached
 func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
-	scs, err := ops.getPXSharedSCs()
+	scs, err := ops.utils.GetPXSharedSCs()
 	if err != nil {
 		return err
 	}
@@ -692,13 +423,13 @@ func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.
 		LabelSelector: "name=portworx",
 	}
 
-	dss, err := ops.kubeClient.Apps().DaemonSets(pxDefaultNamespace).List(listOpts)
+	dss, err := ops.k8sOps.ListDaemonSets(pxDefaultNamespace, listOpts)
 	if err != nil {
 		return nil, err
 	}
 
 	var ociList, dockerList []apps_api.DaemonSet
-	for _, ds := range dss.Items {
+	for _, ds := range dss {
 		for _, c := range ds.Spec.Template.Spec.Containers {
 			if c.Name == "portworx" {
 				if matched, _ := regexp.MatchString(".+oci-monitor.+", c.Image); matched {
@@ -788,7 +519,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 				continue
 			}
 
-			updatedDS, err := ops.kubeClient.Apps().DaemonSets(ds.Namespace).Update(dsCopy)
+			updatedDS, err := ops.k8sOps.UpdateDaemonSet(dsCopy)
 			if err != nil {
 				return nil, true, err
 			}
@@ -808,7 +539,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 		logrus.Infof("checking upgrade status of PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 
 		t = func() (interface{}, bool, error) {
-			updatedDS, err := ops.kubeClient.Apps().DaemonSets(ds.Namespace).Get(ds.Name, metav1.GetOptions{})
+			updatedDS, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
 			if err != nil {
 				return nil, true, err
 			}

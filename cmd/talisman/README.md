@@ -1,6 +1,8 @@
 ### Running talisman
 
-To test talisman, you can run the run_px_upgrade.sh script. For example:
+#### Upgrading PX
+
+You can run the run_px_upgrade.sh script. For example:
 
 ```bash
 ./run_px_upgrade.sh --ocimontag 1.3.0-rc4
@@ -12,7 +14,14 @@ This will start a [Job](https://kubernetes.io/docs/concepts/workloads/controller
 kubectl logs -n kube-system -l job-name=talisman -f
 ```
 
-Run `./run_px_upgrade.sh --help` for more usage examples.
+### Restore scaled down shared applications
 
-Note: Currently, the only operation supported is `upgrade` in the `-operation` arguments of the talisman Job.
+During the upgrade, Portworx might scale down all shared volume PX appplications to 0 replicas.
+If the upgrade gets interuppeted in between by an unexpected failure, you can restore the shared volume PX applications back to their original replica count using below command.
+
+```bash
+./run_shared_app_restore.sh"
+```
+
+Run `./run_px_upgrade.sh --help` for more usage examples.
 
