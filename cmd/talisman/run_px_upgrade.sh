@@ -2,17 +2,22 @@
 
 OCI_MON_IMAGE=
 OCI_MON_TAG=
+TALISMAN_IMAGE=portworx/talisman
+TALISMAN_TAG=latest
 
 usage()
 {
 	echo "
-	usage: $0 --ocimontag <new oci tag> [--ocimonimage <new oci image>]
+	usage: $0 --ocimontag <new oci tag> [--ocimonimage <new oci image>] [--talismanimage <img>] [--talismantag <tag>]
 	examples:
-            # Upgrade Portworx using oci monitor docker tag 1.3.0-rc4
+            # Upgrade Portworx using oci monitor tag 1.3.0-rc4
             $0 --ocimontag 1.3.0-rc4
 
-            # Upgrade Portworx using oci monitor docker tag 1.3.0-rc4 and custom oci mon docker image
+            # Upgrade Portworx using oci monitor tag 1.3.0-rc4 and custom oci mon image
             $0 --ocimonimage harshpx/oci-monitor --ocimontag 1.3.0-rc3
+
+            # Upgrade Portworx using oci monitor tag 1.3.0-rc4 using talisman harshpx/talisman:latest
+            $0 --ocimontag 1.3.0-rc4 --talismanimage harshpx/talisman --talismantag latest
 			"
 	exit 1
 }
@@ -24,6 +29,12 @@ while [ "$1" != "" ]; do
                                 ;;
         --ocimontag )           shift
                                 OCI_MON_TAG=$1
+                                ;;
+        --talismanimage )       shift
+                                TALISMAN_IMAGE=$1
+                                ;;
+        --talismantag )         shift
+                                TALISMAN_TAG=$1
                                 ;;
         -h | --help )           usage
                                 ;;
@@ -78,7 +89,7 @@ spec:
       serviceAccount: talisman-account
       containers:
       - name: talisman
-        image: portworx/talisman:latest
+        image: $TALISMAN_IMAGE:$TALISMAN_TAG
         args: ["-operation",  "upgrade", "-ocimonimage", "$OCI_MON_IMAGE", "-ocimontag" ,"$OCI_MON_TAG"]
       restartPolicy: Never
 EOF

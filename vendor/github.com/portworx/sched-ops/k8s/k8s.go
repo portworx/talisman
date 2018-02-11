@@ -157,14 +157,20 @@ type DeploymentOps interface {
 
 // DaemonSetOps is an interface to perform k8s daemon set operations
 type DaemonSetOps interface {
+	// CreateDaemonSet creates the given daemonset
+	CreateDaemonSet(ds *apps_api.DaemonSet) (*apps_api.DaemonSet, error)
+	// ListDaemonSets lists all daemonsets in given namespace
+	ListDaemonSets(namespace string, listOpts meta_v1.ListOptions) ([]apps_api.DaemonSet, error)
 	// GetDaemonSet gets the the daemon set with given name
 	GetDaemonSet(string, string) (*apps_api.DaemonSet, error)
 	// ValidateDaemonSet checks if the given daemonset is ready
 	ValidateDaemonSet(string, string) error
 	// GetDaemonSetPods returns list of pods for the daemonset
 	GetDaemonSetPods(*apps_api.DaemonSet) ([]v1.Pod, error)
-	// UpdateDaemonSet updates the given daemon set
-	UpdateDaemonSet(*apps_api.DaemonSet) error
+	// UpdateDaemonSet updates the given daemon set and returns the updated ds
+	UpdateDaemonSet(*apps_api.DaemonSet) (*apps_api.DaemonSet, error)
+	// DeleteDaemonSet deletes the given daemonset
+	DeleteDaemonSet(name, namespace string) error
 }
 
 // JobOps is an interface to perform job operations
@@ -1008,6 +1014,27 @@ func (k *k8sOps) GetDeploymentsUsingStorageClass(scName string) ([]apps_api.Depl
 
 // DaemonSet APIs - BEGIN
 
+func (k *k8sOps) CreateDaemonSet(ds *apps_api.DaemonSet) (*apps_api.DaemonSet, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.Apps().DaemonSets(ds.Namespace).Create(ds)
+}
+
+func (k *k8sOps) ListDaemonSets(namespace string, listOpts meta_v1.ListOptions) ([]apps_api.DaemonSet, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	dsList, err := k.client.Apps().DaemonSets(namespace).List(listOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	return dsList.Items, nil
+}
+
 func (k *k8sOps) GetDaemonSet(name, namespace string) (*apps_api.DaemonSet, error) {
 	if err := k.initK8sClient(); err != nil {
 		return nil, err
@@ -1035,27 +1062,28 @@ func (k *k8sOps) ValidateDaemonSet(name, namespace string) error {
 			return "", true, err
 		}
 
+		if ds.Status.DesiredNumberScheduled != ds.Status.UpdatedNumberScheduled {
+			return "", true, &ErrAppNotReady{
+				ID: name,
+				Cause: fmt.Sprintf("Not all pods are updated. expected: %v updated: %v",
+					ds.Status.DesiredNumberScheduled, ds.Status.UpdatedNumberScheduled),
+			}
+		}
+
 		if ds.Status.NumberUnavailable > 0 {
 			return "", true, &ErrAppNotReady{
 				ID: name,
-				Cause: fmt.Sprintf("%d replicas are not yet available. available replicas: %d",
-					ds.Status.NumberUnavailable, ds.Status.NumberAvailable),
+				Cause: fmt.Sprintf("%d pods are not available. available: %d ready: %d updated: %d",
+					ds.Status.NumberUnavailable, ds.Status.NumberAvailable,
+					ds.Status.NumberReady, ds.Status.UpdatedNumberScheduled),
 			}
 		}
 
 		if ds.Status.DesiredNumberScheduled != ds.Status.NumberReady {
 			return "", true, &ErrAppNotReady{
 				ID: name,
-				Cause: fmt.Sprintf("Expected replicas: %v Ready replicas: %v",
+				Cause: fmt.Sprintf("expected ready: %v actual ready: %v",
 					ds.Status.DesiredNumberScheduled, ds.Status.NumberReady),
-			}
-		}
-
-		if ds.Status.DesiredNumberScheduled != ds.Status.UpdatedNumberScheduled {
-			return "", true, &ErrAppNotReady{
-				ID: name,
-				Cause: fmt.Sprintf("Not all pods are updated. Expected: %v Updated replicas: %v",
-					ds.Status.DesiredNumberScheduled, ds.Status.UpdatedNumberScheduled),
 			}
 		}
 
@@ -1106,15 +1134,23 @@ func (k *k8sOps) ValidateDaemonSet(name, namespace string) error {
 	return nil
 }
 
-func (k *k8sOps) UpdateDaemonSet(ds *apps_api.DaemonSet) error {
+func (k *k8sOps) UpdateDaemonSet(ds *apps_api.DaemonSet) (*apps_api.DaemonSet, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.appsClient().DaemonSets(ds.Namespace).Update(ds)
+}
+
+func (k *k8sOps) DeleteDaemonSet(name, namespace string) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
 	}
 
-	if _, err := k.appsClient().DaemonSets(ds.Namespace).Update(ds); err != nil {
-		return err
-	}
-	return nil
+	policy := meta_v1.DeletePropagationForeground
+	return k.client.Apps().DaemonSets(namespace).Delete(
+		name,
+		&meta_v1.DeleteOptions{PropagationPolicy: &policy})
 }
 
 // DaemonSet APIs - END
@@ -1148,7 +1184,7 @@ func (k *k8sOps) DeleteJob(name, namespace string) error {
 
 func (k *k8sOps) ValidateJob(name, namespace string, timeout time.Duration) error {
 	t := func() (interface{}, bool, error) {
-		job, err := k.GetJob(namespace, name)
+		job, err := k.GetJob(name, namespace)
 		if err != nil {
 			return nil, true, err
 		}
