@@ -318,6 +318,17 @@ func debugLog(msg string, args ...interface{}) {
 	}
 }
 
+// normalize absolute path for cache.
+// on Windows, drive letters should be converted to lower as scheme in net/url.URL
+func normalizeAbsPath(path string) string {
+	u, err := url.Parse(path)
+	if err != nil {
+		debugLog("normalize absolute path failed: %s", err)
+		return path
+	}
+	return u.String()
+}
+
 // base or refPath could be a file path or a URL
 // given a base absolute path and a ref path, return the absolute path of refPath
 // 1) if refPath is absolute, return it
@@ -530,7 +541,7 @@ func ExpandSchema(schema *Schema, root interface{}, cache ResolutionCache) error
 		if cache == nil {
 			cache = resCache
 		}
-		cache.Set(base, root)
+		cache.Set(normalizeAbsPath(base), root)
 		base = "root"
 	}
 
@@ -825,6 +836,21 @@ func expandOperation(op *Operation, resolver *schemaLoader, basePath string) err
 	return nil
 }
 
+// ExpandResponse expands a response based on a basepath
+// This is the exported version of expandResponse
+// all refs inside response will be resolved relative to basePath
+func ExpandResponse(response *Response, basePath string) error {
+	opts := &ExpandOptions{
+		RelativeBase: basePath,
+	}
+	resolver, err := defaultSchemaLoader(nil, opts, nil)
+	if err != nil {
+		return err
+	}
+
+	return expandResponse(response, resolver, basePath)
+}
+
 func expandResponse(response *Response, resolver *schemaLoader, basePath string) error {
 	if response == nil {
 		return nil
@@ -856,6 +882,21 @@ func expandResponse(response *Response, resolver *schemaLoader, basePath string)
 		*response.Schema = *s
 	}
 	return nil
+}
+
+// ExpandParameter expands a parameter based on a basepath
+// This is the exported version of expandParameter
+// all refs inside parameter will be resolved relative to basePath
+func ExpandParameter(parameter *Parameter, basePath string) error {
+	opts := &ExpandOptions{
+		RelativeBase: basePath,
+	}
+	resolver, err := defaultSchemaLoader(nil, opts, nil)
+	if err != nil {
+		return err
+	}
+
+	return expandParameter(parameter, resolver, basePath)
 }
 
 func expandParameter(parameter *Parameter, resolver *schemaLoader, basePath string) error {

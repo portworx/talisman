@@ -6,6 +6,7 @@ import (
 
 	"github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
 	"github.com/portworx/talisman/pkg/cluster/px"
+	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/portworx/talisman/pkg/version"
 	"github.com/sirupsen/logrus"
 )
@@ -13,7 +14,8 @@ import (
 type pxOperation string
 
 const (
-	pxOperationUpgrade pxOperation = "upgrade"
+	pxOperationUpgrade           pxOperation = "upgrade"
+	pxOperationRestoreSharedApps pxOperation = "restoresharedapps"
 )
 
 // command line arguments
@@ -39,6 +41,8 @@ func main() {
 	switch pxOperation(op) {
 	case pxOperationUpgrade:
 		doUpgrade()
+	case pxOperationRestoreSharedApps:
+		doRestoreSharedApps()
 	default:
 		logrus.Fatalf("error: invalid operation: %s", op)
 	}
@@ -74,8 +78,21 @@ func doUpgrade() {
 	}
 }
 
+func doRestoreSharedApps() {
+	inst, err := k8sutils.New(kubeconfig)
+	if err != nil {
+		logrus.Fatalf("failed to restore shared apps. err: %v", err)
+	}
+
+	err = inst.RestoreScaledAppsReplicas()
+	if err != nil {
+		logrus.Fatalf("failed to restore shared apps. err: %v", err)
+	}
+}
+
 func init() {
-	flag.StringVar(&op, "operation", "upgrade", "Operation to perform for the Portworx cluster")
+	flag.StringVar(&op, "operation", "upgrade", fmt.Sprintf("Operation to perform for the Portworx cluster. Supported operations: %s, %s",
+		pxOperationUpgrade, pxOperationRestoreSharedApps))
 	flag.StringVar(&newOCIMonTag, "ocimontag", "", "New OCI Monitor tag to use for the upgrade")
 	flag.StringVar(&newOCIMonImage, "ocimonimage", "portworx/oci-monitor", "(optional) New OCI Monitor Image to use for the upgrade")
 	flag.StringVar(&newPXImage, "pximage", "", "(optional) New Portworx Image to use for the upgrade")
