@@ -113,6 +113,15 @@ func (ops *pxClusterOps) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterSta
 }
 
 func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
+	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
+	if err != nil {
+		return err
+	}
+
+	if len(dss) > 0 {
+		return fmt.Errorf("found: %d PX DaemonSet(s) of type docker. Only upgrading from OCI is supported", len(dss))
+	}
+
 	if len(new.Spec.OCIMonTag) == 0 {
 		return fmt.Errorf("new version of Portworx OCI monitor not given to upgrade API")
 	}
@@ -130,8 +139,8 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 
 	logrus.Infof("upgrading px cluster to %s", newOCIMonVer)
 
-	// 1.Start DaemonSet to download the new PX and OCI-mon image and validate it completes
-	err := ops.runDockerPuller(newOCIMonVer)
+	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
+	err = ops.runDockerPuller(newOCIMonVer)
 	if err != nil {
 		return err
 	}
