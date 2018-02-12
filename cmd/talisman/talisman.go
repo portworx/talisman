@@ -83,6 +83,9 @@ func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "(optional) Absolute path of the kubeconfig file")
 	flag.StringVar(&dockerRegistrySecret, "dockerregsecret", "", "(optional) Kubernetes Secret to pull docker images from a private registry")
 	flag.StringVar(&sharedAppsScaleDown, "scaledownsharedapps", string(px.SharedAppsScaleDownAuto),
-		fmt.Sprintf("(optional) instructs scale down behavior of px shared apps. Supported values: %s, %s, %s",
+		fmt.Sprintf("(optional) instructs scale down behavior of Portworx shared apps. Supported values: \n"+
+			"\t%s: During the upgrade process, Portworx shared applications will be scaled down to 0 replicas if 1.2 to 1.3 version upgrade is detected.\n"+
+			"\t%s: During the upgrade process, Portworx shared applications will be unconditionally scaled down to 0 replicas.\n"+
+			"\t%s: Upgrade process will not scale down Portworx shared applications.",
 			px.SharedAppsScaleDownAuto, px.SharedAppsScaleDownOn, px.SharedAppsScaleDownOff))
 }
