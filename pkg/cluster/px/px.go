@@ -134,8 +134,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
 
-	err := ops.preFlightChecks(new)
-	if err != nil {
+	if err := ops.preFlightChecks(new); err != nil {
 		return err
 	}
 
@@ -153,13 +152,11 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 	logrus.Infof("upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
-	err = ops.runDockerPuller(newOCIMonVer)
-	if err != nil {
+	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
 		return err
 	}
 
-	err = ops.runDockerPuller(newPXVer)
-	if err != nil {
+	if err := ops.runDockerPuller(newPXVer); err != nil {
 		return err
 	}
 
@@ -642,8 +639,7 @@ func (ops *pxClusterOps) preFlightChecks(spec *apiv1alpha1.Cluster) error {
 	}
 
 	for _, d := range dss {
-		err = ops.k8sOps.ValidateDaemonSet(d.Name, d.Namespace, 1*time.Minute)
-		if err != nil {
+		if err = ops.k8sOps.ValidateDaemonSet(d.Name, d.Namespace, 1*time.Minute); err != nil {
 			return fmt.Errorf("pre-flight check failed as existing Portworx DaemonSet is not ready. err: %v", err)
 		}
 	}
