@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 
 	"github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
 	"github.com/portworx/talisman/pkg/cluster/px"
@@ -24,6 +25,7 @@ var (
 	op                   string
 	dockerRegistrySecret string
 	kubeconfig           string
+	sharedAppsScaleDown  string
 )
 
 func main() {
@@ -61,7 +63,12 @@ func doUpgrade() {
 			PXTag:       newPXTag,
 		},
 	}
-	err = inst.Upgrade(newSpec)
+
+	opts := &px.UpgradeOptions{
+		SharedAppsScaleDown: px.SharedAppsScaleDownMode(sharedAppsScaleDown),
+	}
+
+	err = inst.Upgrade(newSpec, opts)
 	if err != nil {
 		logrus.Fatalf("failed to ugprade portworx to version: %v. err: %v", newPXImage, err)
 	}
@@ -75,4 +82,7 @@ func init() {
 	flag.StringVar(&newPXTag, "pxtag", "", "(optional) New Portworx tag to use for the upgrade")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "(optional) Absolute path of the kubeconfig file")
 	flag.StringVar(&dockerRegistrySecret, "dockerregsecret", "", "(optional) Kubernetes Secret to pull docker images from a private registry")
+	flag.StringVar(&sharedAppsScaleDown, "scaledownsharedapps", string(px.SharedAppsScaleDownAuto),
+		fmt.Sprintf("(optional) instructs scale down behavior of px shared apps. Supported values: %s, %s, %s",
+			px.SharedAppsScaleDownAuto, px.SharedAppsScaleDownOn, px.SharedAppsScaleDownOff))
 }

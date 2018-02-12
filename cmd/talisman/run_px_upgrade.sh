@@ -4,11 +4,12 @@ OCI_MON_IMAGE=
 OCI_MON_TAG=
 TALISMAN_IMAGE=portworx/talisman
 TALISMAN_TAG=latest
+SCALE_DOWN_SHARED_APPS_MODE=auto
 
 usage()
 {
 	echo "
-	usage: $0 --ocimontag <new oci tag> [--ocimonimage <new oci image>] [--talismanimage <img>] [--talismantag <tag>]
+	usage: $0 --ocimontag <new oci tag> [--ocimonimage <new oci image>] [--talismanimage <img>] [--talismantag <tag>] [--scaledownsharedapps <auto|on|off>]
 	examples:
             # Upgrade Portworx using oci monitor tag 1.3.0-rc4
             $0 --ocimontag 1.3.0-rc4
@@ -29,6 +30,9 @@ while [ "$1" != "" ]; do
                                 ;;
         --ocimontag )           shift
                                 OCI_MON_TAG=$1
+                                ;;
+        --scaledownsharedapps ) shift
+                                SCALE_DOWN_SHARED_APPS_MODE=$1
                                 ;;
         --talismanimage )       shift
                                 TALISMAN_IMAGE=$1
@@ -90,6 +94,6 @@ spec:
       containers:
       - name: talisman
         image: $TALISMAN_IMAGE:$TALISMAN_TAG
-        args: ["-operation",  "upgrade", "-ocimonimage", "$OCI_MON_IMAGE", "-ocimontag" ,"$OCI_MON_TAG"]
+        args: ["-operation",  "upgrade", "-ocimonimage", "$OCI_MON_IMAGE", "-ocimontag" ,"$OCI_MON_TAG", "-scaledownsharedapps", "$SCALE_DOWN_SHARED_APPS_MODE"]
       restartPolicy: Never
 EOF

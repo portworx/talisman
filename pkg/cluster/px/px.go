@@ -34,6 +34,18 @@ const (
 	pxInstallTypeDocker pxInstallType = "docker"
 )
 
+// SharedAppsScaleDownMode is type for choosing behavior of scaling down shared apps
+type SharedAppsScaleDownMode string
+
+const (
+	// SharedAppsScaleDownAuto is mode where shared px apps will be scaled down only when px major version is upgraded
+	SharedAppsScaleDownAuto SharedAppsScaleDownMode = "auto"
+	// SharedAppsScaleDownOn is mode where shared px apps will be scaled down without any version checks
+	SharedAppsScaleDownOn SharedAppsScaleDownMode = "on"
+	// SharedAppsScaleDownOff is mode where shared px apps will not be scaled down
+	SharedAppsScaleDownOff SharedAppsScaleDownMode = "off"
+)
+
 const (
 	defaultPXImage     = "portworx/px-enterprise"
 	pxDefaultNamespace = "kube-system"
@@ -63,6 +75,11 @@ const (
 	dockerPullerDeleteTimeout     = 5 * time.Minute
 )
 
+// UpgradeOptions are optional to customize the upgrade process
+type UpgradeOptions struct {
+	SharedAppsScaleDown SharedAppsScaleDownMode
+}
+
 // Cluster an interface to manage a storage cluster
 type Cluster interface {
 	// Create creates the given cluster
@@ -70,7 +87,7 @@ type Cluster interface {
 	// Status returns the current status of the given cluster
 	Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error)
 	// Upgrade upgrades the given cluster
-	Upgrade(c *apiv1alpha1.Cluster) error
+	Upgrade(c *apiv1alpha1.Cluster, opts *UpgradeOptions) error
 	// Destory destroys all components of the given cluster
 	Destroy(c *apiv1alpha1.Cluster) error
 }
@@ -137,7 +154,11 @@ func (ops *pxClusterOps) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterSta
 	return nil, nil
 }
 
-func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
+func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions) error {
+	if new == nil {
+		return fmt.Errorf("new cluster spec is required for the upgrade call")
+	}
+
 	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
 	if err != nil {
 		return err
@@ -162,7 +183,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 	newOCIMonVer := fmt.Sprintf("%s:%s", new.Spec.OCIMonImage, new.Spec.OCIMonTag)
 	newPXVer := fmt.Sprintf("%s:%s", new.Spec.PXImage, new.Spec.PXTag)
 
-	logrus.Infof("upgrading px cluster to %s", newOCIMonVer)
+	logrus.Infof("upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
 	err = ops.runDockerPuller(newOCIMonVer)
@@ -176,17 +197,12 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 	}
 
 	// 2. (Optional) Scale down px shared applications to 0 replicas for 1.2 => 1.3 upgrade
-	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
+	scaleDownSharedRequired, err := ops.isScaleDownOfSharedAppsRequired(new, opts)
 	if err != nil {
 		return err
 	}
 
-	newMajorMinor, err := parseMajorMinorVersion(new.Spec.OCIMonTag)
-	if err != nil {
-		return err
-	}
-
-	if currentVersionDublin && newMajorMinor == "1.3" {
+	if scaleDownSharedRequired {
 		defer func() { // always restore the replicas
 			err = ops.restoreScaledAppsReplicas()
 			if err != nil {
@@ -205,8 +221,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 			return err
 		}
 	} else {
-		logrus.Infof("skipping scale down of shared volume applications as "+
-			"no cluster nodes are running 1.2 and target version is %s", newMajorMinor)
+		logrus.Infof("skipping scale down of shared volume applications")
 	}
 
 	// 3. Start rolling upgrade of PX DaemonSet
@@ -843,6 +858,29 @@ func (ops *pxClusterOps) isAnyNodeRunningVersionWithPrefix(versionPrefix string)
 	}
 
 	return false, nil
+}
+
+// isScaleDownOfSharedAppsRequired decides if scaling down of PX shared apps is required
+func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(spec *apiv1alpha1.Cluster, opts *UpgradeOptions) (bool, error) {
+	if opts == nil || len(opts.SharedAppsScaleDown) == 0 ||
+		opts.SharedAppsScaleDown == SharedAppsScaleDownAuto {
+		currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
+		if err != nil {
+			return false, err
+		}
+
+		newMajorMinor, err := parseMajorMinorVersion(spec.Spec.OCIMonTag)
+		if err != nil {
+			return false, err
+		}
+
+		logrus.Infof("is any node running dublin version: %v. new version (major.minor): %s",
+			currentVersionDublin, newMajorMinor)
+
+		return currentVersionDublin && newMajorMinor == "1.3", nil
+	}
+
+	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn, nil
 }
 
 func parseMajorMinorVersion(version string) (string, error) {
