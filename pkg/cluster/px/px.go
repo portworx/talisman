@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	osd_api "github.com/libopenstorage/openstorage/api"
+	osd_clusterclient "github.com/libopenstorage/openstorage/api/client/cluster"
 	osd_volclient "github.com/libopenstorage/openstorage/api/client/volume"
+	"github.com/libopenstorage/openstorage/cluster"
 	"github.com/libopenstorage/openstorage/volume"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
@@ -31,6 +34,18 @@ const (
 	pxInstallTypeDocker pxInstallType = "docker"
 )
 
+// SharedAppsScaleDownMode is type for choosing behavior of scaling down shared apps
+type SharedAppsScaleDownMode string
+
+const (
+	// SharedAppsScaleDownAuto is mode where shared px apps will be scaled down only when px major version is upgraded
+	SharedAppsScaleDownAuto SharedAppsScaleDownMode = "auto"
+	// SharedAppsScaleDownOn is mode where shared px apps will be scaled down without any version checks
+	SharedAppsScaleDownOn SharedAppsScaleDownMode = "on"
+	// SharedAppsScaleDownOff is mode where shared px apps will not be scaled down
+	SharedAppsScaleDownOff SharedAppsScaleDownMode = "off"
+)
+
 const (
 	defaultPXImage     = "portworx/px-enterprise"
 	pxDefaultNamespace = "kube-system"
@@ -39,12 +54,15 @@ const (
 	pxdRestPort        = 9001
 	pxServiceName      = "portworx-service"
 	pxClusterRoleName  = "node-get-put-list-role"
+	pxVersionLabel     = "PX Version"
 )
 
 type pxClusterOps struct {
 	kubeClient           kubernetes.Interface
 	k8sOps               k8s.Ops
 	dockerRegistrySecret string
+	clusterManager       cluster.Cluster
+	volDriver            volume.VolumeDriver
 }
 
 // timeouts and intervals
@@ -57,6 +75,11 @@ const (
 	dockerPullerDeleteTimeout     = 5 * time.Minute
 )
 
+// UpgradeOptions are optional to customize the upgrade process
+type UpgradeOptions struct {
+	SharedAppsScaleDown SharedAppsScaleDownMode
+}
+
 // Cluster an interface to manage a storage cluster
 type Cluster interface {
 	// Create creates the given cluster
@@ -64,7 +87,7 @@ type Cluster interface {
 	// Status returns the current status of the given cluster
 	Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error)
 	// Upgrade upgrades the given cluster
-	Upgrade(c *apiv1alpha1.Cluster) error
+	Upgrade(c *apiv1alpha1.Cluster, opts *UpgradeOptions) error
 	// Destory destroys all components of the given cluster
 	Destroy(c *apiv1alpha1.Cluster) error
 }
@@ -95,10 +118,29 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 		return nil, err
 	}
 
+	k8sOps := k8s.Instance()
+
+	svc, err := k8sOps.GetService(pxServiceName, pxDefaultNamespace)
+	if err != nil {
+		return nil, err
+	}
+
+	ip := svc.Spec.ClusterIP
+	if len(ip) == 0 {
+		return nil, fmt.Errorf("PX service doesn't have a clusterIP assigned")
+	}
+
+	volDriver, clusterManager, err := getPXDriver(ip)
+	if err != nil {
+		return nil, err
+	}
+
 	return &pxClusterOps{
 		kubeClient:           kubeClient,
-		k8sOps:               k8s.Instance(),
+		k8sOps:               k8sOps,
 		dockerRegistrySecret: dockerRegistrySecret,
+		volDriver:            volDriver,
+		clusterManager:       clusterManager,
 	}, nil
 }
 
@@ -112,7 +154,11 @@ func (ops *pxClusterOps) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterSta
 	return nil, nil
 }
 
-func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
+func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions) error {
+	if new == nil {
+		return fmt.Errorf("new cluster spec is required for the upgrade call")
+	}
+
 	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
 	if err != nil {
 		return err
@@ -137,7 +183,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 	newOCIMonVer := fmt.Sprintf("%s:%s", new.Spec.OCIMonImage, new.Spec.OCIMonTag)
 	newPXVer := fmt.Sprintf("%s:%s", new.Spec.PXImage, new.Spec.PXTag)
 
-	logrus.Infof("upgrading px cluster to %s", newOCIMonVer)
+	logrus.Infof("upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
 	err = ops.runDockerPuller(newOCIMonVer)
@@ -150,26 +196,35 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster) error {
 		return err
 	}
 
-	// 2. Scale down px shared applications to 0 replicas
-	defer func() { //    Before scaling down apps, add a defer function to always restore the replicas
-		err = ops.restoreScaledAppsReplicas()
+	// 2. (Optional) Scale down px shared applications to 0 replicas for 1.2 => 1.3 upgrade
+	scaleDownSharedRequired, err := ops.isScaleDownOfSharedAppsRequired(new, opts)
+	if err != nil {
+		return err
+	}
+
+	if scaleDownSharedRequired {
+		defer func() { // always restore the replicas
+			err = ops.restoreScaledAppsReplicas()
+			if err != nil {
+				logrus.Errorf("failed to restore PX shared applications replicas. Err: %v", err)
+			}
+		}()
+
+		err = ops.scaleSharedAppsToZero()
 		if err != nil {
-			logrus.Errorf("failed to restore PX shared applications replicas. Err: %v", err)
+			return err
 		}
-	}()
 
-	err = ops.scaleSharedAppsToZero()
-	if err != nil {
-		return err
+		// Wait till all px shared volumes are detached
+		err = ops.waitTillPXSharedVolumesDetached()
+		if err != nil {
+			return err
+		}
+	} else {
+		logrus.Infof("skipping scale down of shared volume applications")
 	}
 
-	// 3. Wait till all px shared volumes are detached
-	err = ops.waitTillPXSharedVolumesDetached()
-	if err != nil {
-		return err
-	}
-
-	// 4. Start rolling upgrade of PX DaemonSet
+	// 3. Start rolling upgrade of PX DaemonSet
 	err = ops.upgradePX(newOCIMonVer)
 	if err != nil {
 		return err
@@ -586,15 +641,11 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
 		}
 	}
 
-	pxd, err := ops.getPXDriver()
-	if err != nil {
-		return err
-	}
 	logrus.Infof("waiting for detachment of PX shared volumes: %s", volsToInspect)
 
 	t := func() (interface{}, bool, error) {
 
-		vols, err := pxd.Inspect(volsToInspect)
+		vols, err := ops.volDriver.Inspect(volsToInspect)
 		if err != nil {
 			return nil, true, err
 		}
@@ -616,26 +667,23 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
 	return nil
 }
 
-// getPXDriver returns an instance of the PX driver client
-func (ops *pxClusterOps) getPXDriver() (volume.VolumeDriver, error) {
-	svc, err := ops.k8sOps.GetService(pxServiceName, pxDefaultNamespace)
-	if err != nil {
-		return nil, err
-	}
-
-	ip := svc.Spec.ClusterIP
-	if len(ip) == 0 {
-		return nil, fmt.Errorf("PX service doesn't have a clusterIP assigned")
-	}
-
+// getPXDriver returns an instance of the PX volume and cluster driver client
+func getPXDriver(ip string) (volume.VolumeDriver, cluster.Cluster, error) {
 	pxEndpoint := fmt.Sprintf("http://%s:%d", ip, pxdRestPort)
 
 	dClient, err := osd_volclient.NewDriverClient(pxEndpoint, "pxd", "", "pxd")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return osd_volclient.VolumeDriver(dClient), nil
+	cClient, err := osd_clusterclient.NewClusterClient(pxEndpoint, "v1")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	volDriver := osd_volclient.VolumeDriver(dClient)
+	clusterManager := osd_clusterclient.ClusterManager(cClient)
+	return volDriver, clusterManager, nil
 }
 
 // getPXDaemonsets return PX daemonsets in the cluster based on given installer type
@@ -724,7 +772,8 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == "portworx" {
 					if c.Image == newVersion {
-						logrus.Infof("skipping PX daemonset: [%s] %s as it is already at %s version.", ds.Namespace, ds.Name, newVersion)
+						logrus.Infof("skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
+							ds.Namespace, ds.Name, newVersion)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
 						skip = true
 					} else {
@@ -787,6 +836,60 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	}
 
 	return nil
+}
+
+// isAnyNodeRunningVersionWithPrefix checks if any node in the cluster has a PX version with given prefix
+func (ops *pxClusterOps) isAnyNodeRunningVersionWithPrefix(versionPrefix string) (bool, error) {
+	cluster, err := ops.clusterManager.Enumerate()
+	if err != nil {
+		return false, err
+	}
+
+	for _, n := range cluster.Nodes {
+		ver := cluster.Nodes[0].NodeLabels[pxVersionLabel]
+		if len(ver) == 0 {
+			return false, fmt.Errorf("no version found in labels for node: %s", cluster.Nodes[0].Id)
+		}
+
+		if strings.HasPrefix(ver, versionPrefix) {
+			logrus.Infof("node: %s has version: %s with prefix: %s", n.Id, ver, versionPrefix)
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// isScaleDownOfSharedAppsRequired decides if scaling down of PX shared apps is required
+func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(spec *apiv1alpha1.Cluster, opts *UpgradeOptions) (bool, error) {
+	if opts == nil || len(opts.SharedAppsScaleDown) == 0 ||
+		opts.SharedAppsScaleDown == SharedAppsScaleDownAuto {
+		currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
+		if err != nil {
+			return false, err
+		}
+
+		newMajorMinor, err := parseMajorMinorVersion(spec.Spec.OCIMonTag)
+		if err != nil {
+			return false, err
+		}
+
+		logrus.Infof("is any node running dublin version: %v. new version (major.minor): %s",
+			currentVersionDublin, newMajorMinor)
+
+		return currentVersionDublin && newMajorMinor == "1.3", nil
+	}
+
+	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn, nil
+}
+
+func parseMajorMinorVersion(version string) (string, error) {
+	matches := regexp.MustCompile(`^(\d+\.\d+).*`).FindStringSubmatch(version)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("failed to get PX major.minor version from %s", version)
+	}
+
+	return matches[1], nil
 }
 
 func isNotFoundErr(err error) bool {

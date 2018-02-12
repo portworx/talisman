@@ -331,7 +331,7 @@ func (c *Controller) sync(ev event) error {
 	case kwatch.Added:
 		err = c.clusterProvider.Create(cluster)
 	case kwatch.Modified:
-		err = c.clusterProvider.Upgrade(cluster)
+		err = c.clusterProvider.Upgrade(cluster, &px.UpgradeOptions{})
 	case kwatch.Deleted:
 		err = c.clusterProvider.Destroy(cluster)
 	default:
