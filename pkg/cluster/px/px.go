@@ -134,17 +134,9 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
 
-	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
+	err := ops.preFlightChecks(new)
 	if err != nil {
 		return err
-	}
-
-	if len(dss) > 0 {
-		return fmt.Errorf("found: %d PX DaemonSet(s) of type docker. Only upgrading from OCI is supported", len(dss))
-	}
-
-	if len(new.Spec.OCIMonTag) == 0 {
-		return fmt.Errorf("new version of Portworx OCI monitor not given to upgrade API")
 	}
 
 	if len(new.Spec.PXImage) == 0 {
@@ -332,7 +324,12 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 
 	logrus.Infof("started docker puller daemonSet: %s", ds.Name)
 
-	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace)
+	daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
+	if err != nil {
+		return err
+	}
+
+	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
 	if err != nil {
 		logrus.Errorf("failed to run daemonset to pull %s image", imageToPull)
 		return err
@@ -558,8 +555,13 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			return err
 		}
 
-		logrus.Infof("doing additional validations of PX daemonset: [%s] %s", ds.Namespace, ds.Name)
-		err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace)
+		daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
+		if err != nil {
+			return err
+		}
+
+		logrus.Infof("doing additional validations of PX daemonset: [%s] %s. timeout: %v", ds.Namespace, ds.Name, daemonsetReadyTimeout)
+		err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
 		if err != nil {
 			return err
 		}
@@ -613,6 +615,50 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(spec *apiv1alpha1.Clust
 	}
 
 	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn, nil
+}
+
+func (ops *pxClusterOps) preFlightChecks(spec *apiv1alpha1.Cluster) error {
+	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
+	if err != nil {
+		return err
+	}
+
+	if len(dss) > 0 {
+		return fmt.Errorf("pre-flight check failed as found: %d PX DaemonSet(s) of type docker. Only upgrading from OCI is supported", len(dss))
+	}
+
+	if len(spec.Spec.OCIMonTag) == 0 {
+		return fmt.Errorf("pre-flight check failed as new version of Portworx OCI monitor not given to upgrade API")
+	}
+
+	// check if PX is not ready in any of the nodes
+	dss, err = ops.getPXDaemonsets(pxInstallTypeOCI)
+	if err != nil {
+		return err
+	}
+
+	if len(dss) == 0 {
+		return fmt.Errorf("pre-flight check failed as it did not find any PX daemonsets for install type: %s", pxInstallTypeOCI)
+	}
+
+	for _, d := range dss {
+		err = ops.k8sOps.ValidateDaemonSet(d.Name, d.Namespace, 1*time.Minute)
+		if err != nil {
+			return fmt.Errorf("pre-flight check failed as existing Portworx DaemonSet is not ready. err: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
+	nodes, err := ops.k8sOps.GetNodes()
+	if err != nil {
+		return 0, err
+	}
+
+	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * 10 * time.Minute
+	return daemonsetReadyTimeout, nil
 }
 
 func parseMajorMinorVersion(version string) (string, error) {

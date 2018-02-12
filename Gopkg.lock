@@ -77,7 +77,7 @@
   branch = "master"
   name = "github.com/go-openapi/spec"
   packages = ["."]
-  revision = "e5cac0107f33264c59bcfe43d12a0e19eba644f0"
+  revision = "a7c696777f29fd0998254e1bceb37275f0cc59b6"
 
 [[projects]]
   branch = "master"
@@ -223,7 +223,7 @@
     "snapshot/pkg/apis/crd/v1",
     "snapshot/pkg/client"
   ]
-  revision = "fa57d4c8354d1328cb7153f1caa52bed7a79b127"
+  revision = "5ec20e01017609a74b1df23434a2b4506580459d"
 
 [[projects]]
   branch = "logrus"
@@ -308,7 +308,7 @@
     "k8s",
     "task"
   ]
-  revision = "cb72ca58fba7d217d99720298d4e6f294aa514c0"
+  revision = "5ae06fc2c63b289dac49063afb5fb8c0c9412266"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
