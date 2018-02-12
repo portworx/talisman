@@ -14,10 +14,25 @@
   revision = "de5bf2ad457846296e2031421a34e2568e304e35"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/armon/go-metrics"
+  packages = ["."]
+  revision = "7aa49fde808223f8dadfdbfd3a20ff6c19e5f9ec"
+
+[[projects]]
+  name = "github.com/cloudfoundry/gosigar"
+  packages = [
+    ".",
+    "sys/windows"
+  ]
+  revision = "dcb1afc219e4c99f21c37fb1ec22ed9ffe443317"
+  version = "v1.1.0"
+
+[[projects]]
   name = "github.com/coreos/etcd-operator"
   packages = ["pkg/util/probe"]
-  revision = "85c37511b1293a530ab98c0118e117a30ad0fe26"
-  version = "v0.8.3"
+  revision = "9f1ccce1398bdfaec38829e38431aad97dac16ab"
+  version = "v0.9.0"
 
 [[projects]]
   name = "github.com/davecgh/go-spew"
@@ -31,8 +46,8 @@
     ".",
     "log"
   ]
-  revision = "2dd44038f0b95ae693b266c5f87593b5d2fdd78d"
-  version = "v2.5.0"
+  revision = "26b41036311f2da8242db402557a0dbd09dc83da"
+  version = "v2.6.0"
 
 [[projects]]
   name = "github.com/emicklei/go-restful-swagger12"
@@ -62,7 +77,7 @@
   branch = "master"
   name = "github.com/go-openapi/spec"
   packages = ["."]
-  revision = "f3499b5df53897321d6f5e9c22cf19309d41d3bc"
+  revision = "e5cac0107f33264c59bcfe43d12a0e19eba644f0"
 
 [[projects]]
   branch = "master"
@@ -89,7 +104,7 @@
   branch = "master"
   name = "github.com/golang/groupcache"
   packages = ["lru"]
-  revision = "84a468cf14b4376def5d68c722b139b881c450a4"
+  revision = "66deaeb636dff1ac7d938ce666d090556056a4b0"
 
 [[projects]]
   name = "github.com/golang/protobuf"
@@ -136,12 +151,46 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/hashicorp/errwrap"
+  packages = ["."]
+  revision = "7554cd9344cec97297fa6649b055a8c98c2a1e55"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-immutable-radix"
+  packages = ["."]
+  revision = "7f3cd4390caab3250a57f30efdb2a65dd7649ecf"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-msgpack"
+  packages = ["codec"]
+  revision = "fa3f63826f7c23912c15263591e65d54d080b458"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-multierror"
+  packages = ["."]
+  revision = "b7773ae218740a7be65057fc60b366a49b538a44"
+
+[[projects]]
+  branch = "master"
   name = "github.com/hashicorp/golang-lru"
   packages = [
     ".",
     "simplelru"
   ]
   revision = "0fb14efe8c47ae851c0034ed7a448854d3d34cf3"
+
+[[projects]]
+  name = "github.com/hashicorp/logutils"
+  packages = ["."]
+  revision = "0dc08b1671f34c4250ce212759ebd880f743d883"
+
+[[projects]]
+  name = "github.com/hashicorp/memberlist"
+  packages = ["."]
+  revision = "7c7d6bae440fb7c6dcde850672e0f68263f9e29c"
 
 [[projects]]
   branch = "master"
@@ -174,18 +223,38 @@
     "snapshot/pkg/apis/crd/v1",
     "snapshot/pkg/client"
   ]
-  revision = "0c97204ba6ec839db94ec1beff590200eb673d52"
+  revision = "fa57d4c8354d1328cb7153f1caa52bed7a79b127"
 
 [[projects]]
-  branch = "master"
+  branch = "logrus"
+  name = "github.com/libopenstorage/gossip"
+  packages = [
+    ".",
+    "proto",
+    "proto/state",
+    "types"
+  ]
+  revision = "4112ac59f59ac9cc2253e8100831a22c567cf7e3"
+
+[[projects]]
+  branch = "sirupsen-lowercase"
   name = "github.com/libopenstorage/openstorage"
   packages = [
     "api",
     "api/client",
+    "api/client/cluster",
     "api/client/volume",
+    "cluster",
+    "config",
     "volume"
   ]
-  revision = "7611cb033cadf5ee28d16c83c8cb7bd13f2e1091"
+  revision = "217b3616bdb5266ba3098f4f78e3f643e03a20f2"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/libopenstorage/systemutils"
+  packages = ["."]
+  revision = "dc0e35340804a0ada0792a3c9ce51d33ddd53cc8"
 
 [[projects]]
   branch = "master"
@@ -196,6 +265,12 @@
     "jwriter"
   ]
   revision = "32fa128f234d041f196a9f3e0fea5ac9772c08e1"
+
+[[projects]]
+  name = "github.com/miekg/dns"
+  packages = ["."]
+  revision = "5364553f1ee9cddc7ac8b62dce148309c386695b"
+  version = "v1.0.4"
 
 [[projects]]
   branch = "master"
@@ -216,19 +291,29 @@
   version = "v2.0.1"
 
 [[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
+
+[[projects]]
+  name = "github.com/portworx/kvdb"
+  packages = ["."]
+  revision = "d6ab05eb4a6d2e5132c0046d4e23f09775d0a738"
+
+[[projects]]
   branch = "master"
   name = "github.com/portworx/sched-ops"
   packages = [
     "k8s",
     "task"
   ]
-  revision = "07ef49137b83a614eec1aa3a91bc5c4da4edc97d"
+  revision = "cb72ca58fba7d217d99720298d4e6f294aa514c0"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
   packages = ["."]
-  revision = "d682213848ed68c0a260ca37d6dd5ace8423f5ba"
-  version = "v1.0.4"
+  revision = "6d9ae300aaf85d6acd2e5424081c7fcddb21dab8"
 
 [[projects]]
   name = "github.com/spf13/pflag"
@@ -238,21 +323,39 @@
 
 [[projects]]
   branch = "master"
+  name = "go.pedge.io/dlog"
+  packages = [
+    ".",
+    "logrus"
+  ]
+  revision = "259758e801e1eab2626d1c1f1767994f8e40e55a"
+
+[[projects]]
+  branch = "master"
   name = "golang.org/x/crypto"
-  packages = ["ssh/terminal"]
-  revision = "1875d0a70c90e57f11972aefd42276df65e895b9"
+  packages = [
+    "ed25519",
+    "ed25519/internal/edwards25519",
+    "ssh/terminal"
+  ]
+  revision = "9de5f2eaf759b4c4550b3db39fed2e9e5f86f45c"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = [
+    "bpf",
     "context",
     "http2",
     "http2/hpack",
     "idna",
+    "internal/iana",
+    "internal/socket",
+    "ipv4",
+    "ipv6",
     "lex/httplex"
   ]
-  revision = "2fb46b16b8dda405028c50f7c7f0f9dd1fa6bfb1"
+  revision = "f5dfe339be1d06f81b22525fe34671ee7d2c8904"
 
 [[projects]]
   branch = "master"
@@ -283,7 +386,7 @@
     "unicode/rangetable",
     "width"
   ]
-  revision = "e19ae1496984b1c655b8044a65c0300a3c878dd3"
+  revision = "4e4a3210bb54bb31f6ab2cdca2edcc0b50c420c1"
 
 [[projects]]
   name = "gopkg.in/inf.v0"
@@ -338,7 +441,7 @@
     "pkg/client/clientset/clientset/scheme",
     "pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
   ]
-  revision = "ed43f04e5359fe96ddec30cceeb7053be9300bd1"
+  revision = "d64d645c52b769d38dbfa509fcba27186c212117"
 
 [[projects]]
   branch = "release-1.8"
@@ -511,6 +614,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ed878f1810d674479c37bdf799aef546ae1d0ef10e8e8adc5e6721906ee7a32d"
+  inputs-digest = "0eb95c964f6a7e53dfd33c8b1588202c77b6c9bc604d499df611e62cfd38ea4a"
   solver-name = "gps-cdcl"
   solver-version = 1

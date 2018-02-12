@@ -4,13 +4,13 @@ package k8sutils
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"time"
 
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
@@ -136,7 +136,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 		t := func() (interface{}, bool, error) {
 			dCopy, err := k.kubeClient.Apps().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
 			if err != nil {
-				if IsNotFoundErr(err) {
+				if errors.IsNotFound(err) {
 					return nil, false, nil // done as deployment is deleted
 				}
 
@@ -173,7 +173,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 		t := func() (interface{}, bool, error) {
 			sCopy, err := k.kubeClient.Apps().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
 			if err != nil {
-				if IsNotFoundErr(err) {
+				if errors.IsNotFound(err) {
 					return nil, false, nil // done as statefulset is deleted
 				}
 
@@ -217,7 +217,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 		t := func() (interface{}, bool, error) {
 			dCopy, err := k.kubeClient.Apps().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
 			if err != nil {
-				if IsNotFoundErr(err) {
+				if errors.IsNotFound(err) {
 					return nil, false, nil // done as deployment is deleted
 				}
 
@@ -262,7 +262,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 		t := func() (interface{}, bool, error) {
 			sCopy, err := k.kubeClient.Apps().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
 			if err != nil {
-				if IsNotFoundErr(err) {
+				if errors.IsNotFound(err) {
 					return nil, false, nil // done as statefulset is deleted
 				}
 
@@ -301,10 +301,4 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 	}
 
 	return nil
-}
-
-// IsNotFoundErr returns true if the given error is the object not found error returned by k8s api
-func IsNotFoundErr(err error) bool {
-	matched, _ := regexp.MatchString(".+ not found", err.Error())
-	return matched
 }

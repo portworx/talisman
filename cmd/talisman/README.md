@@ -17,7 +17,7 @@ kubectl logs -n kube-system -l job-name=talisman -f
 ### Restore scaled down shared applications
 
 During the upgrade, Portworx might scale down all shared volume PX appplications to 0 replicas.
-If the upgrade gets interuppeted in between by an unexpected failure, you can restore the shared volume PX applications back to their original replica count using below command.
+If the upgrade gets interuppted in between by an unexpected failure, you can restore the shared volume PX applications back to their original replica count using below command.
 
 ```bash
 ./run_shared_app_restore.sh"

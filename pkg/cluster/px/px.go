@@ -19,6 +19,7 @@ import (
 	apps_api "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -307,7 +308,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 
 	// Cleanup any lingering DaemonSet for docker-pull if it exists
 	err := ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
-	if err != nil && !k8sutils.IsNotFoundErr(err) {
+	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
