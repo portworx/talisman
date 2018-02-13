@@ -11,9 +11,13 @@ before_install:
 script:
   - make docker-build
 after_success:
-  - if [ "${TRAVIS_BRANCH}" == "master" ] && [ "${TRAVIS_PULL_REQUEST}" == "false" ]; then
+  - if [ "${TRAVIS_PULL_REQUEST}" == "false" ]; then
       docker login -u="${DOCKER_USER}" -p="${DOCKER_PASS}";
-      make deploy;
+      if [ "${TRAVIS_BRANCH}" == "master" ]; then
+        make deploy;
+      elif [ "${TRAVIS_BRANCH}" == "1.7" ]; then
+        DOCKER_HUB_TAG="${DOCKER_HUB_1_7_TAG}" make deploy;
+      fi
     fi
 notifications:
   email:

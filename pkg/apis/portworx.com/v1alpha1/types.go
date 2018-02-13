@@ -2,7 +2,6 @@ package v1alpha1
 
 import (
 	"github.com/libopenstorage/openstorage/api"
-	"k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -49,10 +48,6 @@ type ClusterSpec struct {
 	// Storage specifies the storage configuration to be used for all nodes.
 	// This can be overridden by individual nodes in the NodeSpec
 	Storage StorageSpec `json:"storage,omitempty"`
-	// Placement specifies the rules by which PX nodes are selected
-	Placement PlacementSpec `json:"placement,omitempty"`
-	// Env is the list of environment variables to expose to PX pods
-	Env []v1.EnvVar `json:"env,omitempty"`
 }
 
 // Nodes are all Portworx nodes participating in this cluster
@@ -105,23 +100,4 @@ type StorageSpec struct {
 	Force               bool     `json:"force,omitempty"`
 	UseAll              bool     `json:"useAll,omitempty"`
 	UseAllWithParitions bool     `json:"useAllWithParitions,omitempty"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// PlacementSpec defines placement rules for various px components
-type PlacementSpec struct {
-	meta.TypeMeta `json:",inline"`
-	PX            Placement `json:"px,omitempty"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// Placement encapsulates the various kubernetes options that control where pods are scheduled and executed.
-type Placement struct {
-	meta.TypeMeta   `json:",inline"`
-	NodeAffinity    *v1.NodeAffinity    `json:"nodeAffinity,omitempty"`
-	PodAffinity     *v1.PodAffinity     `json:"podAffinity,omitempty"`
-	PodAntiAffinity *v1.PodAntiAffinity `json:"podAntiAffinity,omitempty"`
-	Tolerations     []v1.Toleration     `json:"tolerations,omitemtpy"`
 }

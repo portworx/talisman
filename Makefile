@@ -52,11 +52,11 @@ all: clean pretest operator talisman
 version:
 	@echo $(VERSION)
 
-operator: codegen
+operator:
 	mkdir -p $(BIN)
 	go build $(LDFLAGS) -o $(BIN)/operator cmd/operator/main.go
 
-talisman: codegen
+talisman:
 	mkdir -p $(BIN)
 	go build $(LDFLAGS) -o $(BIN)/talisman cmd/talisman/talisman.go
 
@@ -107,7 +107,7 @@ verifycodegen:
 	@echo "Verifying generated files"
 	@./hack/verify-codegen.sh
 
-pretest: checkfmt vet lint errcheck verifycodegen
+pretest: checkfmt vet lint errcheck
 
 container:
 	sudo docker build --tag $(TALISMAN_IMG) -f Dockerfile.talisman .

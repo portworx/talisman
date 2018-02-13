@@ -9,11 +9,11 @@ import (
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
-	apps_api "k8s.io/api/apps/v1beta2"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	apps_api "k8s.io/client-go/pkg/apis/apps/v1beta1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -148,7 +148,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 				return nil, false, nil
 			}
 
-			dCopy = dCopy.DeepCopy()
+			//dCopy = dCopy.DeepCopy() TODO check if deep copy exists
 
 			// save current replica count in annotations so it can be used later on to restore the replicas
 			dCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *dCopy.Spec.Replicas)
@@ -180,7 +180,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 				return nil, true, err
 			}
 
-			sCopy = sCopy.DeepCopy()
+			//sCopy = sCopy.DeepCopy()
 			// save current replica count in annotations so it can be used later on to restore the replicas
 			sCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *sCopy.Spec.Replicas)
 			sCopy.Spec.Replicas = &valZero
@@ -224,7 +224,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 				return nil, true, err
 			}
 
-			dCopy = dCopy.DeepCopy()
+			//dCopy = dCopy.DeepCopy()
 			if dCopy.Annotations == nil {
 				return nil, false, nil // done as this is not an app we touched
 			}
@@ -269,7 +269,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 				return nil, true, err
 			}
 
-			sCopy = sCopy.DeepCopy()
+			//sCopy = sCopy.DeepCopy()
 			if sCopy.Annotations == nil {
 				return nil, false, nil // done as this is not an app we touched
 			}

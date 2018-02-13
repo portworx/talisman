@@ -1,4 +1,4 @@
-# Builing and Running Portworx Operator
+# Builing and Running Talisman
 
 ## Vendoring
 
@@ -11,7 +11,7 @@ For vendoring, we use [dep](https://golang.github.io/dep/).
 
 #### Compile
 ```bash
-make docker-build
+make
 ```
 #### Build and push docker image
 ```bash
@@ -22,14 +22,3 @@ export DOCKER_HUB_TAG=latest
 make deploy
 ```
 
-## Test
-
-#### Deploy the Portworx CRD
-```bash
-kubectl create -f examples/px-crd.yaml
-```
-
-#### Deploy Portworx cluster
-```bash
-kubectl create -f examples/px-cluster.yaml
-```

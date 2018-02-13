@@ -18,8 +18,6 @@ import (
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 var (
@@ -66,13 +64,6 @@ func main() {
 	// TODO dump version and git sha. Refer to start of etcd-operator
 	fmt.Println("Go Version:", runtime.Version())
 
-	id, err := os.Hostname()
-	if err != nil {
-		logrus.Fatalf("failed to get hostname: %v", err)
-	}
-
-	kubecli := newKubeClient()
-
 	// TODO add /metrics endpoint
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	go func() {
@@ -81,30 +72,7 @@ func main() {
 		}
 	}()
 
-	rl, err := resourcelock.New(resourcelock.EndpointsResourceLock,
-		namespace,
-		"talisman",
-		kubecli.CoreV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      id,
-			EventRecorder: controller.CreateRecorder(kubecli, name, namespace),
-		})
-	if err != nil {
-		logrus.Fatalf("error creating lock: %v", err)
-	}
-
-	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
-		Lock:          rl,
-		LeaseDuration: 15 * time.Second,
-		RenewDeadline: 10 * time.Second,
-		RetryPeriod:   2 * time.Second,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
-			OnStoppedLeading: func() {
-				logrus.Fatalf("leader election lost")
-			},
-		},
-	})
+	run(nil) // TODO re-add once we add 1.7 support for operator
 
 	panic("unreachable")
 }

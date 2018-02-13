@@ -4,11 +4,12 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/portworx/talisman)](https://goreportcard.com/report/github.com/portworx/talisman)
 [![GitHub release](https://img.shields.io/github/release/portworx/talisman/all.svg?style=flat-square)](https://github.com/portworx/talisman/releases)
 
-Portworx operator orchestrates the installation, upgrade and monitoring of a Portworx cluster in your Kubernetes Cluster.
+Talisman orchestrates the upgrade of a Portworx cluster in your Kubernetes Cluster.
 
 ## Documentation
-* [Building and Running the Portworx Operator](doc/build/README.md).
-* [Design](doc/design/README.md)
+* [Building](doc/build/README.md)
+* [Talisman usage](cmd/talisman/README.md)
+* [Docker puller usage](cmd/docker-puller/README.md)
 
 ## Issues
 

@@ -59,7 +59,6 @@ metadata:
   name: talisman
   namespace: kube-system
 spec:
-  backoffLimit: 1
   template:
     spec:
       serviceAccount: talisman-account

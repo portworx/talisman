@@ -16,12 +16,12 @@ import (
 	apiv1alpha1 "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
 	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/sirupsen/logrus"
-	apps_api "k8s.io/api/apps/v1beta2"
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	corev1 "k8s.io/client-go/pkg/api/v1"
+	extensions_api "k8s.io/client-go/pkg/apis/extensions/v1beta1"
+	rbacv1 "k8s.io/client-go/pkg/apis/rbac/v1beta1"
 )
 
 type pxInstallType string
@@ -241,13 +241,13 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 		})
 	}
 
-	ds := &apps_api.DaemonSet{
+	ds := &extensions_api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pullerName,
 			Namespace: pxDefaultNamespace,
 			Labels:    labels,
 		},
-		Spec: apps_api.DaemonSetSpec{
+		Spec: extensions_api.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
@@ -413,7 +413,7 @@ func getPXDriver(ip string) (volume.VolumeDriver, cluster.Cluster, error) {
 }
 
 // getPXDaemonsets return PX daemonsets in the cluster based on given installer type
-func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.DaemonSet, error) {
+func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]extensions_api.DaemonSet, error) {
 	listOpts := metav1.ListOptions{
 		LabelSelector: "name=portworx",
 	}
@@ -423,7 +423,7 @@ func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.
 		return nil, err
 	}
 
-	var ociList, dockerList []apps_api.DaemonSet
+	var ociList, dockerList []extensions_api.DaemonSet
 	for _, ds := range dss {
 		for _, c := range ds.Spec.Template.Spec.Containers {
 			if c.Name == "portworx" {
@@ -477,7 +477,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 		return err
 	}
 
-	var dss []apps_api.DaemonSet
+	var dss []extensions_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
 	t := func() (interface{}, bool, error) {
@@ -493,9 +493,8 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 		for _, ds := range dss {
 			skip := false
 			logrus.Infof("upgrading PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
-			dsCopy := ds.DeepCopy()
-			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
-				c := &dsCopy.Spec.Template.Spec.Containers[i]
+			for i := 0; i < len(ds.Spec.Template.Spec.Containers); i++ {
+				c := &ds.Spec.Template.Spec.Containers[i]
 				if c.Name == "portworx" {
 					if c.Image == newVersion {
 						logrus.Infof("skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
@@ -514,7 +513,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 				continue
 			}
 
-			updatedDS, err := ops.k8sOps.UpdateDaemonSet(dsCopy)
+			updatedDS, err := ops.k8sOps.UpdateDaemonSet(&ds)
 			if err != nil {
 				return nil, true, err
 			}
