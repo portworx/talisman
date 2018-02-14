@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/portworx/talisman)](https://goreportcard.com/report/github.com/portworx/talisman)
 [![GitHub release](https://img.shields.io/github/release/portworx/talisman/all.svg?style=flat-square)](https://github.com/portworx/talisman/releases)
 
-Talisman orchestrates the upgrade of a Portworx cluster in your Kubernetes Cluster.
+Talisman orchestrates the upgrade of Portworx in your Kubernetes Cluster.
 
 ## Documentation
 * [Building](doc/build/README.md)
