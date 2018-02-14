@@ -17,6 +17,7 @@ after_success:
         make deploy;
       elif [ "${TRAVIS_BRANCH}" == "1.7" ]; then
         DOCKER_HUB_TAG="${DOCKER_HUB_1_7_TAG}" make deploy;
+        DOCKER_HUB_TAG="${DOCKER_HUB_1_6_TAG}" make deploy;
       fi
     fi
 notifications:
