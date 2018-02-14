@@ -26,7 +26,6 @@
 
 [[override]]
   name = "github.com/libopenstorage/gossip"
-  source = "https://github.com/harsh-px/gossip.git"
   branch = "logrus"
 
 [[constraint]]

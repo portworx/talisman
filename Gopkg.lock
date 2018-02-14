@@ -231,7 +231,6 @@
     "types"
   ]
   revision = "52c68b624b404d0383501ac1898daf67aea4d0db"
-  source = "https://github.com/harsh-px/gossip.git"
 
 [[projects]]
   branch = "sirupsen-lowercase"
@@ -606,6 +605,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "f2e1be8bd2144df6b01000fee1547fd88a40504df376b9338b6d08a3c5df4cf8"
+  inputs-digest = "85f488870d8406e8d1721601b642676dbd0cb5521eee3aa050357f970d4282fb"
   solver-name = "gps-cdcl"
   solver-version = 1
