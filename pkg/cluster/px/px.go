@@ -44,14 +44,15 @@ const (
 )
 
 const (
-	defaultPXImage       = "portworx/px-enterprise"
-	pxDefaultNamespace   = "kube-system"
-	dockerPullerImage    = "portworx/docker-puller:latest"
-	pxdRestPort          = 9001
-	pxServiceName        = "portworx-service"
-	pxClusterRoleName    = "node-get-put-list-role"
-	pxVersionLabel       = "PX Version"
-	defaultRetryInterval = 10 * time.Second
+	defaultPXImage         = "portworx/px-enterprise"
+	pxDefaultNamespace     = "kube-system"
+	dockerPullerImage      = "portworx/docker-puller:latest"
+	pxdRestPort            = 9001
+	pxServiceName          = "portworx-service"
+	pxClusterRoleName      = "node-get-put-list-role"
+	pxVersionLabel         = "PX Version"
+	defaultRetryInterval   = 10 * time.Second
+	talismanServiceAccount = "talisman-account"
 )
 
 type pxClusterOps struct {
@@ -279,7 +280,8 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 							},
 						},
 					},
-					RestartPolicy: "Always",
+					RestartPolicy:      "Always",
+					ServiceAccountName: talismanServiceAccount,
 					Volumes: []corev1.Volume{
 						{
 							Name: "varrun",
