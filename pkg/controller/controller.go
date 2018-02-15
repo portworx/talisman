@@ -333,7 +333,7 @@ func (c *Controller) sync(ev event) error {
 	case kwatch.Modified:
 		err = c.clusterProvider.Upgrade(cluster, &px.UpgradeOptions{})
 	case kwatch.Deleted:
-		err = c.clusterProvider.Destroy(cluster)
+		err = c.clusterProvider.Delete(cluster, &px.DeleteOptions{})
 	default:
 		err = fmt.Errorf("unsupported event type for cluster: %s", cluster.Name)
 	}
