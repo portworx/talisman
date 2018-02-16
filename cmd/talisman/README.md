@@ -2,10 +2,10 @@
 
 #### Upgrading PX
 
-You can run the run_px_upgrade.sh script. For example:
+You can run run_px_upgrade.sh in scripts directory. For example:
 
 ```bash
-./run_px_upgrade.sh --ocimontag 1.3.0-rc4
+./scripts/run_px_upgrade.sh --ocimontag 1.3.0-rc4
 ```
 
 This will start a [Job](https://kubernetes.io/docs/concepts/workloads/controllers/jobs-run-to-completion/). You can monitor the job logs using:
@@ -20,8 +20,8 @@ During the upgrade, Portworx might scale down all shared volume PX appplications
 If the upgrade gets interuppted in between by an unexpected failure, you can restore the shared volume PX applications back to their original replica count using below command.
 
 ```bash
-./run_shared_app_restore.sh
+./scripts/run_shared_app_restore.sh
 ```
 
-Run `./run_px_upgrade.sh --help` for more usage examples.
+Run `./scripts/run_px_upgrade.sh --help` for more usage examples.
 

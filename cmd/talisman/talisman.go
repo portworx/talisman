@@ -16,6 +16,7 @@ type pxOperation string
 const (
 	pxOperationUpgrade           pxOperation = "upgrade"
 	pxOperationRestoreSharedApps pxOperation = "restoresharedapps"
+	pxOperationDelete            pxOperation = "delete"
 )
 
 // command line arguments
@@ -28,6 +29,7 @@ var (
 	dockerRegistrySecret string
 	kubeconfig           string
 	sharedAppsScaleDown  string
+	wipeCluster          bool
 )
 
 func main() {
@@ -43,6 +45,8 @@ func main() {
 		doUpgrade()
 	case pxOperationRestoreSharedApps:
 		doRestoreSharedApps()
+	case pxOperationDelete:
+		doDelete()
 	default:
 		logrus.Fatalf("error: invalid operation: %s", op)
 	}
@@ -90,9 +94,25 @@ func doRestoreSharedApps() {
 	}
 }
 
+func doDelete() {
+	inst, err := px.NewPXClusterProvider(dockerRegistrySecret, kubeconfig)
+	if err != nil {
+		logrus.Fatalf("failed to instantiate PX cluster provider. err: %v", err)
+	}
+
+	opts := &px.DeleteOptions{
+		WipeCluster: wipeCluster,
+	}
+
+	err = inst.Delete(nil, opts)
+	if err != nil {
+		logrus.Fatalf("ailed to delete PX cluster. err: %v", err)
+	}
+}
+
 func init() {
-	flag.StringVar(&op, "operation", "upgrade", fmt.Sprintf("Operation to perform for the Portworx cluster. Supported operations: %s, %s",
-		pxOperationUpgrade, pxOperationRestoreSharedApps))
+	flag.StringVar(&op, "operation", "upgrade", fmt.Sprintf("Operation to perform for the Portworx cluster. Supported operations: %s, %s, %s",
+		pxOperationUpgrade, pxOperationRestoreSharedApps, pxOperationDelete))
 	flag.StringVar(&newOCIMonTag, "ocimontag", "", "New OCI Monitor tag to use for the upgrade")
 	flag.StringVar(&newOCIMonImage, "ocimonimage", "portworx/oci-monitor", "(optional) New OCI Monitor Image to use for the upgrade")
 	flag.StringVar(&newPXImage, "pximage", "", "(optional) New Portworx Image to use for the upgrade")
@@ -105,4 +125,6 @@ func init() {
 			"\t%s: During the upgrade process, Portworx shared applications will be unconditionally scaled down to 0 replicas.\n"+
 			"\t%s: Upgrade process will not scale down Portworx shared applications.",
 			px.SharedAppsScaleDownAuto, px.SharedAppsScaleDownOn, px.SharedAppsScaleDownOff))
+	flag.BoolVar(&wipeCluster, "wipecluster", false, "(optional) If given, all Portworx metadata will be removed from the cluster. "+
+		"This means all the data will be wiped off from the cluster and cannot be recovered")
 }
