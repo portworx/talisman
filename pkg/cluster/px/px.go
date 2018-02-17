@@ -689,7 +689,7 @@ func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
 
 func (ops *pxClusterOps) wipePXKvdb() error {
 	logrus.Info("attempting to parse kvdb info from Portworx daemonset")
-	endpoints, opts, err := ops.parseKvdbFromDaemonset()
+	endpoints, opts, clusterName, err := ops.parseKvdbFromDaemonset()
 	if err != nil {
 		return err
 	}
@@ -700,21 +700,22 @@ func (ops *pxClusterOps) wipePXKvdb() error {
 		return err
 	}
 
-	logrus.Infof("deleting Portworx kvdb tree: %s for endpoint(s): %v", pxKvdbPrefix, endpoints)
-	return kvdbInst.DeleteTree("")
+	logrus.Infof("deleting Portworx kvdb tree: %s/%s for endpoint(s): %v", pxKvdbPrefix, clusterName, endpoints)
+	return kvdbInst.DeleteTree(clusterName)
 }
 
-func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, error) {
+func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, string, error) {
 	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	if len(dss) == 0 {
-		return nil, nil, fmt.Errorf("no Portworx daemonset found on the cluster")
+		return nil, nil, "", fmt.Errorf("no Portworx daemonset found on the cluster")
 	}
 
 	ds := dss[0]
+	var clusterName string
 	endpoints := make([]string, 0)
 	opts := make(map[string]string)
 
@@ -723,15 +724,17 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 			for i, arg := range c.Args {
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
+				case "-c":
+					clusterName = c.Args[i+1]
 				case "-k":
 					endpoints, err = splitCSV(c.Args[i+1])
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, "", err
 					}
 				case "-pwd":
 					parts := strings.Split(c.Args[i+1], ":")
 					if len(parts) != 0 {
-						return nil, nil, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
+						return nil, nil, "", fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
 					}
 					opts[kvdb.UsernameKey] = parts[0]
 					opts[kvdb.PasswordKey] = parts[1]
@@ -753,11 +756,16 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 	}
 
 	if len(endpoints) == 0 {
-		return nil, nil, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
+		return nil, nil, "", fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
-	return endpoints, opts, nil
+	if len(clusterName) == 0 {
+		return nil, nil, "", fmt.Errorf("failed to get cluster name from daemonset containers: %v",
+			ds.Spec.Template.Spec.Containers)
+	}
+
+	return endpoints, opts, clusterName, nil
 }
 
 func splitCSV(in string) ([]string, error) {
