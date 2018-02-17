@@ -44,6 +44,10 @@
   name = "github.com/portworx/sched-ops"
   branch = "master"
 
+[[override]]
+  name = "github.com/coreos/bbolt"
+  version = "v1.3.1-coreos.6"
+
 [prune]
   go-tests = true
   unused-packages = true

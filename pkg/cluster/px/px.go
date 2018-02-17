@@ -1,6 +1,7 @@
 package px
 
 import (
+	"encoding/csv"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,6 +12,10 @@ import (
 	osd_volclient "github.com/libopenstorage/openstorage/api/client/volume"
 	"github.com/libopenstorage/openstorage/cluster"
 	"github.com/libopenstorage/openstorage/volume"
+	"github.com/portworx/kvdb"
+	"github.com/portworx/kvdb/consul"
+	e2 "github.com/portworx/kvdb/etcd/v2"
+	e3 "github.com/portworx/kvdb/etcd/v3"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
 	apiv1alpha1 "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
@@ -53,6 +58,8 @@ const (
 	pxVersionLabel         = "PX Version"
 	defaultRetryInterval   = 10 * time.Second
 	talismanServiceAccount = "talisman-account"
+	pxContainerName        = "portworx"
+	pxKvdbPrefix           = "pwx/"
 )
 
 type pxClusterOps struct {
@@ -70,9 +77,15 @@ const (
 	dockerPullerDeleteTimeout     = 5 * time.Minute
 )
 
-// UpgradeOptions are optional to customize the upgrade process
+// UpgradeOptions are options to customize the upgrade process
 type UpgradeOptions struct {
 	SharedAppsScaleDown SharedAppsScaleDownMode
+}
+
+// DeleteOptions are options to customize the delete process
+type DeleteOptions struct {
+	// WipeCluster instructs if Portworx cluster metadata needs to be wiped off
+	WipeCluster bool
 }
 
 // Cluster an interface to manage a storage cluster
@@ -83,8 +96,8 @@ type Cluster interface {
 	Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error)
 	// Upgrade upgrades the given cluster
 	Upgrade(c *apiv1alpha1.Cluster, opts *UpgradeOptions) error
-	// Destory destroys all components of the given cluster
-	Destroy(c *apiv1alpha1.Cluster) error
+	// Delete removes all components of the given cluster
+	Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error
 }
 
 // NewPXClusterProvider creates a new PX cluster
@@ -198,8 +211,23 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 	return nil
 }
 
-func (ops *pxClusterOps) Destroy(c *apiv1alpha1.Cluster) error {
-	logrus.Warnf("destroying px cluster is implemented")
+func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
+	if opts != nil && opts.WipeCluster {
+		// the wipe operation is best effort as it is used when cluster is already in a bad shape. for e.g
+		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off
+
+		// 1. Cleanup PX kvdb tree
+		err := ops.wipePXKvdb()
+		if err != nil {
+			logrus.Warnf("failed to wipe Portworx KVDB tree. err: %v", err)
+		}
+
+		// 2. TODO remove PX systemd service on each node
+		// 3. TODO peform local node wipes
+	}
+
+	// 4. TODO Query all PX k8s components in cluster and delete them
+
 	return nil
 }
 
@@ -428,7 +456,7 @@ func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.
 	var ociList, dockerList []apps_api.DaemonSet
 	for _, ds := range dss {
 		for _, c := range ds.Spec.Template.Spec.Containers {
-			if c.Name == "portworx" {
+			if c.Name == pxContainerName {
 				if matched, _ := regexp.MatchString(".+oci-monitor.+", c.Image); matched {
 					ociList = append(ociList, ds)
 				} else {
@@ -498,7 +526,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			dsCopy := ds.DeepCopy()
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
-				if c.Name == "portworx" {
+				if c.Name == pxContainerName {
 					if c.Image == newVersion {
 						logrus.Infof("skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, newVersion)
@@ -657,6 +685,161 @@ func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
 
 	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * 10 * time.Minute
 	return daemonsetReadyTimeout, nil
+}
+
+func (ops *pxClusterOps) wipePXKvdb() error {
+	logrus.Info("attempting to parse kvdb info from Portworx daemonset")
+	endpoints, opts, clusterName, err := ops.parseKvdbFromDaemonset()
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("creating kvdb client for: %v", endpoints)
+	kvdbInst, err := getKVDBClient(endpoints, opts)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("deleting Portworx kvdb tree: %s/%s for endpoint(s): %v", pxKvdbPrefix, clusterName, endpoints)
+	return kvdbInst.DeleteTree(clusterName)
+}
+
+func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, string, error) {
+	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	if len(dss) == 0 {
+		return nil, nil, "", fmt.Errorf("no Portworx daemonset found on the cluster")
+	}
+
+	ds := dss[0]
+	var clusterName string
+	endpoints := make([]string, 0)
+	opts := make(map[string]string)
+
+	for _, c := range ds.Spec.Template.Spec.Containers {
+		if c.Name == pxContainerName {
+			for i, arg := range c.Args {
+				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
+				switch arg {
+				case "-c":
+					clusterName = c.Args[i+1]
+				case "-k":
+					endpoints, err = splitCSV(c.Args[i+1])
+					if err != nil {
+						return nil, nil, "", err
+					}
+				case "-pwd":
+					parts := strings.Split(c.Args[i+1], ":")
+					if len(parts) != 0 {
+						return nil, nil, "", fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
+					}
+					opts[kvdb.UsernameKey] = parts[0]
+					opts[kvdb.PasswordKey] = parts[1]
+				case "-ca":
+					opts[kvdb.CAFileKey] = c.Args[i+1]
+				case "-cert":
+					opts[kvdb.CertFileKey] = c.Args[i+1]
+				case "-key":
+					opts[kvdb.CertKeyFileKey] = c.Args[i+1]
+				case "-acl":
+					opts[kvdb.ACLTokenKey] = c.Args[i+1]
+				default:
+					// pass
+				}
+			}
+
+			break
+		}
+	}
+
+	if len(endpoints) == 0 {
+		return nil, nil, "", fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
+			ds.Spec.Template.Spec.Containers)
+	}
+
+	if len(clusterName) == 0 {
+		return nil, nil, "", fmt.Errorf("failed to get cluster name from daemonset containers: %v",
+			ds.Spec.Template.Spec.Containers)
+	}
+
+	return endpoints, opts, clusterName, nil
+}
+
+func splitCSV(in string) ([]string, error) {
+	r := csv.NewReader(strings.NewReader(in))
+	r.TrimLeadingSpace = true
+	records, err := r.ReadAll()
+	if err != nil || len(records) < 1 {
+		return []string{}, err
+	} else if len(records) > 1 {
+		return []string{}, fmt.Errorf("Multiline CSV not supported")
+	}
+	return records[0], err
+}
+
+func getKVDBClient(endpoints []string, opts map[string]string) (kvdb.Kvdb, error) {
+	var urlPrefix, kvdbType, kvdbName string
+	for i, url := range endpoints {
+		urlTokens := strings.Split(url, ":")
+		if i == 0 {
+			if urlTokens[0] == "etcd" {
+				kvdbType = "etcd"
+			} else if urlTokens[0] == "consul" {
+				kvdbType = "consul"
+			} else {
+				return nil, fmt.Errorf("unknown discovery endpoint : %v in %v", urlTokens[0], endpoints)
+			}
+		}
+
+		if urlTokens[1] == "http" {
+			urlPrefix = "http"
+			urlTokens[1] = ""
+		} else if urlTokens[1] == "https" {
+			urlPrefix = "https"
+			urlTokens[1] = ""
+		} else {
+			urlPrefix = "http"
+		}
+
+		kvdbURL := ""
+		for j, v := range urlTokens {
+			if j == 0 {
+				kvdbURL = urlPrefix
+			} else {
+				if v != "" {
+					kvdbURL = kvdbURL + ":" + v
+				}
+			}
+		}
+		endpoints[i] = kvdbURL
+	}
+
+	var kvdbVersion string
+	var err error
+	for i, url := range endpoints {
+		kvdbVersion, err = kvdb.Version(kvdbType+"-kv", url, opts)
+		if err == nil {
+			break
+		} else if i == len(endpoints)-1 {
+			return nil, err
+		}
+	}
+
+	switch kvdbVersion {
+	case kvdb.ConsulVersion1:
+		kvdbName = consul.Name
+	case kvdb.EtcdBaseVersion:
+		kvdbName = e2.Name
+	case kvdb.EtcdVersion3:
+		kvdbName = e3.Name
+	default:
+		return nil, fmt.Errorf("Unknown kvdb endpoint (%v) and version (%v) ", endpoints, kvdbVersion)
+	}
+
+	return kvdb.New(kvdbName, pxKvdbPrefix, endpoints, opts, nil)
 }
 
 func parseMajorMinorVersion(version string) (string, error) {
