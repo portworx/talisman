@@ -7,6 +7,7 @@
 
 DOCKER_HUB_TAG ?= latest
 DOCKER_PULLER_IMG=$(DOCKER_HUB_REPO)/docker-puller:$(DOCKER_HUB_TAG)
+PX_NODE_WIPER_IMG=$(DOCKER_HUB_REPO)/px-node-wiper:$(DOCKER_HUB_TAG)
 TALISMAN_IMG=$(DOCKER_HUB_REPO)/talisman:$(DOCKER_HUB_TAG)
 
 SHA := $(shell git rev-parse --short HEAD)
@@ -63,10 +64,6 @@ talisman: codegen
 test:
 	go test -tags "$(TAGS)" $(TESTFLAGS) $(PKGS)
 
-docker-puller:
-	sudo docker build -t $(DOCKER_PULLER_IMG) cmd/docker-puller/
-	sudo docker push $(DOCKER_PULLER_IMG)
-
 fmt:
 	@echo "Performing gofmt on following: $(PKGS)"
 	@./hack/do-gofmt.sh $(PKGS)
@@ -112,10 +109,12 @@ pretest: checkfmt vet lint errcheck verifycodegen
 container:
 	sudo docker build --tag $(TALISMAN_IMG) -f Dockerfile.talisman .
 	sudo docker build --tag $(DOCKER_PULLER_IMG) cmd/docker-puller/
+	sudo docker build -t $(PX_NODE_WIPER_IMG) cmd/px-node-wiper/
 
 deploy: container
 	sudo docker push $(TALISMAN_IMG)
 	sudo docker push $(DOCKER_PULLER_IMG)
+	sudo docker push $(PX_NODE_WIPER_IMG)
 
 docker-build:
 	docker build -t px/docker-build -f Dockerfile.build .
@@ -132,5 +131,6 @@ clean:
 	-sudo rm -rf $(BIN)
 	-docker rmi -f $(OPERATOR_IMG)
 	-docker rmi -f $(DOCKER_PULLER_IMG)
+	-docker rmi -f $(PX_NODE_WIPER_IMG)
 	-docker rmi -f $(TALISMAN_IMG)
 	go clean -i $(PKGS)

@@ -52,14 +52,13 @@ const (
 	pxDefaultNamespace            = "kube-system"
 	defaultPXImage                = "portworx/px-enterprise"
 	dockerPullerImage             = "portworx/docker-puller:latest"
+	pxNodeWiperImage              = "portworx/px-node-wiper:latest"
 	pxdRestPort                   = 9001
 	pxServiceName                 = "portworx-service"
 	pxClusterRoleName             = "node-get-put-list-role"
 	pxClusterRoleBindingName      = "node-role-binding"
 	pxServiceAccountName          = "px-account"
 	pxVersionLabel                = "PX Version"
-	defaultRetryInterval          = 10 * time.Second
-	daemonsetDeleteTimeout        = 5 * time.Minute
 	talismanServiceAccount        = "talisman-account"
 	storkControllerName           = "stork"
 	storkServiceName              = "stork-service"
@@ -86,9 +85,11 @@ type pxClusterOps struct {
 
 // timeouts and intervals
 const (
+	defaultRetryInterval          = 10 * time.Second
+	pxNodeWiperTimeout            = 4 * time.Minute
 	sharedVolDetachTimeout        = 5 * time.Minute
 	daemonsetUpdateTriggerTimeout = 5 * time.Minute
-	dockerPullerDeleteTimeout     = 5 * time.Minute
+	daemonsetDeleteTimeout        = 5 * time.Minute
 )
 
 // UpgradeOptions are options to customize the upgrade process
@@ -228,19 +229,23 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
 	if opts != nil && opts.WipeCluster {
 		// the wipe operation is best effort as it is used when cluster is already in a bad shape. for e.g
-		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off
+		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
-		// 1. Cleanup PX kvdb tree
-		err := ops.wipePXKvdb()
+		// 1. Wipe px from each node
+		err := ops.runPXNodeWiper()
+		if err != nil {
+			logrus.Warnf("failed to wipe Portworx local node state. err: %v", err)
+		}
+
+		// 2. Cleanup PX kvdb tree
+		err = ops.wipePXKvdb()
 		if err != nil {
 			logrus.Warnf("failed to wipe Portworx KVDB tree. err: %v", err)
 		}
 
-		// 2. TODO remove PX systemd service on each node
-		// 3. TODO peform local node wipes
 	}
 
-	// 4. Query all PX k8s components in cluster and delete them
+	// 3. Query all PX k8s components in cluster and delete them
 	err := ops.deleteAllPXComponents()
 	if err != nil {
 		return err
@@ -343,49 +348,14 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 		},
 	}
 
-	// Cleanup any lingering DaemonSet for docker-pull if it exists
-	err := ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	t := func() (interface{}, bool, error) {
-		_, err := ops.k8sOps.GetDaemonSet(pullerName, pxDefaultNamespace)
-		if err == nil {
-			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", pxDefaultNamespace, pullerName)
-		}
-
-		return nil, false, nil
-	}
-
-	if _, err := task.DoRetryWithTimeout(t, dockerPullerDeleteTimeout, defaultRetryInterval); err != nil {
-		return err
-	}
-
-	ds, err = ops.k8sOps.CreateDaemonSet(ds)
-	if err != nil {
-		return err
-	}
-
-	logrus.Infof("started docker puller daemonSet: %s", ds.Name)
-
 	daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
 	if err != nil {
 		return err
 	}
 
-	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
+	err = ops.runDaemonSet(ds, daemonsetReadyTimeout)
 	if err != nil {
-		logrus.Errorf("failed to run daemonset to pull %s image", imageToPull)
-		return err
-	}
-
-	logrus.Infof("validated successfull run of docker puller: %s", ds.Name)
-
-	err = ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
-	if err != nil {
-		logrus.Warnf("error while deleting docker puller: %v", err)
-		return err
+		return fmt.Errorf("failed to run docker puller daemonset. err: %v", err)
 	}
 
 	return nil
@@ -848,6 +818,139 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 
 	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
 	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+func (ops *pxClusterOps) runPXNodeWiper() error {
+	wiperName := "px-node-wiper"
+	trueVar := true
+	labels := map[string]string{
+		"name": wiperName,
+	}
+	args := []string{"-w"}
+	ds := &apps_api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      wiperName,
+			Namespace: pxDefaultNamespace,
+			Labels:    labels,
+		},
+		Spec: apps_api.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            wiperName,
+							Image:           pxNodeWiperImage,
+							ImagePullPolicy: corev1.PullAlways,
+							Args:            args,
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &trueVar,
+							},
+							ReadinessProbe: &corev1.Probe{
+								InitialDelaySeconds: 30,
+								Handler: corev1.Handler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"cat", "/tmp/px-node-wipe-done"},
+									},
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "etcpwx",
+									MountPath: "/etc/pwx",
+								},
+								{
+									Name:      "hostproc1",
+									MountPath: "/hostproc/1/ns",
+								},
+								{
+									Name:      "optpwx",
+									MountPath: "/opt/pwx",
+								},
+							},
+						},
+					},
+					RestartPolicy:      "Always",
+					ServiceAccountName: talismanServiceAccount,
+					Volumes: []corev1.Volume{
+						{
+							Name: "etcpwx",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/etc/pwx",
+								},
+							},
+						},
+						{
+							Name: "hostproc1",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/proc/1/ns",
+								},
+							},
+						},
+						{
+							Name: "optpwx",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/opt/pwx",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return ops.runDaemonSet(ds, pxNodeWiperTimeout)
+}
+
+func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Duration) error {
+	err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	t := func() (interface{}, bool, error) {
+		_, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
+		if err == nil {
+			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", ds.Namespace, ds.Name)
+		}
+
+		return nil, false, nil
+	}
+
+	if _, err := task.DoRetryWithTimeout(t, daemonsetDeleteTimeout, defaultRetryInterval); err != nil {
+		return err
+	}
+
+	ds, err = ops.k8sOps.CreateDaemonSet(ds)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("started daemonSet: [%s] %s", ds.Namespace, ds.Name)
+
+	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("validated successfull run of daemonset: [%s] %s", ds.Namespace, ds.Name)
+
+	err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+	if err != nil {
+		logrus.Errorf("error while deleting daemonset: %v", err)
 		return err
 	}
 
