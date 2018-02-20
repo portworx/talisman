@@ -49,17 +49,31 @@ const (
 )
 
 const (
-	defaultPXImage         = "portworx/px-enterprise"
-	pxDefaultNamespace     = "kube-system"
-	dockerPullerImage      = "portworx/docker-puller:latest"
-	pxdRestPort            = 9001
-	pxServiceName          = "portworx-service"
-	pxClusterRoleName      = "node-get-put-list-role"
-	pxVersionLabel         = "PX Version"
-	defaultRetryInterval   = 10 * time.Second
-	talismanServiceAccount = "talisman-account"
-	pxContainerName        = "portworx"
-	pxKvdbPrefix           = "pwx/"
+	pxDefaultNamespace            = "kube-system"
+	defaultPXImage                = "portworx/px-enterprise"
+	dockerPullerImage             = "portworx/docker-puller:latest"
+	pxdRestPort                   = 9001
+	pxServiceName                 = "portworx-service"
+	pxClusterRoleName             = "node-get-put-list-role"
+	pxClusterRoleBindingName      = "node-role-binding"
+	pxServiceAccountName          = "px-account"
+	pxVersionLabel                = "PX Version"
+	defaultRetryInterval          = 10 * time.Second
+	daemonsetDeleteTimeout        = 5 * time.Minute
+	talismanServiceAccount        = "talisman-account"
+	storkControllerName           = "stork"
+	storkServiceName              = "stork-service"
+	storkControllerConfigMap      = "stork-config"
+	storkControllerClusterRole    = "stork-role"
+	storkControllerClusterBinding = "stork-role-binding"
+	storkControllerServiceAccount = "stork-account"
+	storkSchedulerClusterRole     = "stork-scheduler-role"
+	storkSchedulerCluserBinding   = "stork-scheduler-role-binding"
+	storkSchedulerServiceAccount  = "stork-scheduler-account"
+	storkSchedulerName            = "stork-scheduler"
+	storkSnapshotStorageClass     = "stork-snapshot-sc"
+	pxContainerName               = "portworx"
+	pxKvdbPrefix                  = "pwx/"
 )
 
 type pxClusterOps struct {
@@ -226,7 +240,11 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 		// 3. TODO peform local node wipes
 	}
 
-	// 4. TODO Query all PX k8s components in cluster and delete them
+	// 4. Query all PX k8s components in cluster and delete them
+	err := ops.deleteAllPXComponents()
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -768,6 +786,74 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 	return endpoints, opts, clusterName, nil
 }
 
+func (ops *pxClusterOps) deleteAllPXComponents() error {
+	logrus.Infof("deleting all PX Kubernetes components from the cluster")
+
+	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
+	if err != nil {
+		return err
+	}
+
+	for _, ds := range dss {
+		err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		if err != nil {
+			return err
+		}
+	}
+
+	depNames := [2]string{storkControllerName, storkSchedulerName}
+	for _, depName := range depNames {
+		err = ops.k8sOps.DeleteDeployment(depName, pxDefaultNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	clusterRoles := [3]string{pxClusterRoleName, storkControllerClusterRole, storkSchedulerClusterRole}
+	for _, role := range clusterRoles {
+		err = ops.k8sOps.DeleteClusterRole(role)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	bindings := [3]string{pxClusterRoleBindingName, storkControllerClusterBinding, storkSchedulerCluserBinding}
+	for _, binding := range bindings {
+		err = ops.k8sOps.DeleteClusterRoleBinding(binding)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	accounts := [3]string{pxServiceAccountName, storkControllerServiceAccount, storkSchedulerServiceAccount}
+	for _, acc := range accounts {
+		err = ops.k8sOps.DeleteServiceAccount(acc, pxDefaultNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	services := [2]string{pxServiceName, storkServiceName}
+	for _, svc := range services {
+		err = ops.k8sOps.DeleteService(svc, pxDefaultNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	err = ops.k8sOps.DeleteConfigMap(storkControllerConfigMap, pxDefaultNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
 func splitCSV(in string) ([]string, error) {
 	r := csv.NewReader(strings.NewReader(in))
 	r.TrimLeadingSpace = true
@@ -849,9 +935,4 @@ func parseMajorMinorVersion(version string) (string, error) {
 	}
 
 	return matches[1], nil
-}
-
-func isNotFoundErr(err error) bool {
-	matched, _ := regexp.MatchString(".+ not found", err.Error())
-	return matched
 }
