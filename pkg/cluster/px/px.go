@@ -52,14 +52,13 @@ const (
 	pxDefaultNamespace            = "kube-system"
 	defaultPXImage                = "portworx/px-enterprise"
 	dockerPullerImage             = "portworx/docker-puller:latest"
+	pxNodeWiperImage              = "portworx/px-node-wiper:latest"
 	pxdRestPort                   = 9001
 	pxServiceName                 = "portworx-service"
 	pxClusterRoleName             = "node-get-put-list-role"
 	pxClusterRoleBindingName      = "node-role-binding"
 	pxServiceAccountName          = "px-account"
 	pxVersionLabel                = "PX Version"
-	defaultRetryInterval          = 10 * time.Second
-	daemonsetDeleteTimeout        = 5 * time.Minute
 	talismanServiceAccount        = "talisman-account"
 	storkControllerName           = "stork"
 	storkServiceName              = "stork-service"
@@ -86,9 +85,11 @@ type pxClusterOps struct {
 
 // timeouts and intervals
 const (
+	defaultRetryInterval          = 10 * time.Second
+	pxNodeWiperTimeout            = 4 * time.Minute
 	sharedVolDetachTimeout        = 5 * time.Minute
 	daemonsetUpdateTriggerTimeout = 5 * time.Minute
-	dockerPullerDeleteTimeout     = 5 * time.Minute
+	daemonsetDeleteTimeout        = 5 * time.Minute
 )
 
 // UpgradeOptions are options to customize the upgrade process
@@ -177,7 +178,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 	newOCIMonVer := fmt.Sprintf("%s:%s", new.Spec.OCIMonImage, new.Spec.OCIMonTag)
 	newPXVer := fmt.Sprintf("%s:%s", new.Spec.PXImage, new.Spec.PXTag)
 
-	logrus.Infof("upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
+	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
 	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
@@ -198,7 +199,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 		defer func() { // always restore the replicas
 			err = ops.utils.RestoreScaledAppsReplicas()
 			if err != nil {
-				logrus.Errorf("failed to restore PX shared applications replicas. Err: %v", err)
+				logrus.Errorf("Failed to restore PX shared applications replicas. Err: %v", err)
 			}
 		}()
 
@@ -213,7 +214,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 			return err
 		}
 	} else {
-		logrus.Infof("skipping scale down of shared volume applications")
+		logrus.Infof("Skipping scale down of shared volume applications")
 	}
 
 	// 3. Start rolling upgrade of PX DaemonSet
@@ -228,19 +229,23 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
 	if opts != nil && opts.WipeCluster {
 		// the wipe operation is best effort as it is used when cluster is already in a bad shape. for e.g
-		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off
+		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
-		// 1. Cleanup PX kvdb tree
-		err := ops.wipePXKvdb()
+		// 1. Wipe px from each node
+		err := ops.runPXNodeWiper()
 		if err != nil {
-			logrus.Warnf("failed to wipe Portworx KVDB tree. err: %v", err)
+			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		}
 
-		// 2. TODO remove PX systemd service on each node
-		// 3. TODO peform local node wipes
+		// 2. Cleanup PX kvdb tree
+		err = ops.wipePXKvdb()
+		if err != nil {
+			logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
+		}
+
 	}
 
-	// 4. Query all PX k8s components in cluster and delete them
+	// 3. Query all PX k8s components in cluster and delete them
 	err := ops.deleteAllPXComponents()
 	if err != nil {
 		return err
@@ -262,7 +267,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 
 	var env []corev1.EnvVar
 	if len(ops.dockerRegistrySecret) != 0 {
-		logrus.Infof("using user-provided docker registry credentials from secret: %s", ops.dockerRegistrySecret)
+		logrus.Infof("Using user-provided docker registry credentials from secret: %s", ops.dockerRegistrySecret)
 		env = append(env, corev1.EnvVar{
 			Name: "REGISTRY_USER",
 			ValueFrom: &corev1.EnvVarSource{
@@ -343,49 +348,14 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 		},
 	}
 
-	// Cleanup any lingering DaemonSet for docker-pull if it exists
-	err := ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	t := func() (interface{}, bool, error) {
-		_, err := ops.k8sOps.GetDaemonSet(pullerName, pxDefaultNamespace)
-		if err == nil {
-			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", pxDefaultNamespace, pullerName)
-		}
-
-		return nil, false, nil
-	}
-
-	if _, err := task.DoRetryWithTimeout(t, dockerPullerDeleteTimeout, defaultRetryInterval); err != nil {
-		return err
-	}
-
-	ds, err = ops.k8sOps.CreateDaemonSet(ds)
-	if err != nil {
-		return err
-	}
-
-	logrus.Infof("started docker puller daemonSet: %s", ds.Name)
-
 	daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
 	if err != nil {
 		return err
 	}
 
-	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
+	err = ops.runDaemonSet(ds, daemonsetReadyTimeout)
 	if err != nil {
-		logrus.Errorf("failed to run daemonset to pull %s image", imageToPull)
-		return err
-	}
-
-	logrus.Infof("validated successfull run of docker puller: %s", ds.Name)
-
-	err = ops.k8sOps.DeleteDaemonSet(pullerName, pxDefaultNamespace)
-	if err != nil {
-		logrus.Warnf("error while deleting docker puller: %v", err)
-		return err
+		return fmt.Errorf("failed to run docker puller daemonset. err: %v", err)
 	}
 
 	return nil
@@ -415,7 +385,7 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
 		}
 	}
 
-	logrus.Infof("waiting for detachment of PX shared volumes: %s", volsToInspect)
+	logrus.Infof("Waiting for detachment of PX shared volumes: %s", volsToInspect)
 
 	t := func() (interface{}, bool, error) {
 
@@ -430,7 +400,7 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
 			}
 		}
 
-		logrus.Infof("all shared volumes: %v detached", volsToInspect)
+		logrus.Infof("All shared volumes: %v detached", volsToInspect)
 		return nil, false, nil
 	}
 
@@ -540,13 +510,13 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 
 		for _, ds := range dss {
 			skip := false
-			logrus.Infof("upgrading PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
+			logrus.Infof("Upgrading PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 			dsCopy := ds.DeepCopy()
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == pxContainerName {
 					if c.Image == newVersion {
-						logrus.Infof("skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
+						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, newVersion)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
 						skip = true
@@ -567,7 +537,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 				return nil, true, err
 			}
 
-			logrus.Infof("initiated upgrade of PX daemonset: [%s] %s to version: %s",
+			logrus.Infof("Initiated upgrade of PX daemonset: [%s] %s to version: %s",
 				updatedDS.Namespace, updatedDS.Name, newVersion)
 		}
 
@@ -579,7 +549,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	}
 
 	for _, ds := range dss {
-		logrus.Infof("checking upgrade status of PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
+		logrus.Infof("Checking upgrade status of PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 
 		t = func() (interface{}, bool, error) {
 			updatedDS, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
@@ -605,13 +575,13 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			return err
 		}
 
-		logrus.Infof("doing additional validations of PX daemonset: [%s] %s. timeout: %v", ds.Namespace, ds.Name, daemonsetReadyTimeout)
+		logrus.Infof("Doing additional validations of PX daemonset: [%s] %s. timeout: %v", ds.Namespace, ds.Name, daemonsetReadyTimeout)
 		err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
 		if err != nil {
 			return err
 		}
 
-		logrus.Infof("successfully upgraded PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
+		logrus.Infof("Successfully upgraded PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 	}
 
 	return nil
@@ -631,7 +601,7 @@ func (ops *pxClusterOps) isAnyNodeRunningVersionWithPrefix(versionPrefix string)
 		}
 
 		if strings.HasPrefix(ver, versionPrefix) {
-			logrus.Infof("node: %s has version: %s with prefix: %s", n.Id, ver, versionPrefix)
+			logrus.Infof("Node: %s has version: %s with prefix: %s", n.Id, ver, versionPrefix)
 			return true, nil
 		}
 	}
@@ -653,7 +623,7 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(spec *apiv1alpha1.Clust
 			return false, err
 		}
 
-		logrus.Infof("is any node running dublin version: %v. new version (major.minor): %s",
+		logrus.Infof("Is any node running dublin version: %v. new version (major.minor): %s",
 			currentVersionDublin, newMajorMinor)
 
 		return currentVersionDublin && newMajorMinor == "1.3", nil
@@ -706,19 +676,19 @@ func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
 }
 
 func (ops *pxClusterOps) wipePXKvdb() error {
-	logrus.Info("attempting to parse kvdb info from Portworx daemonset")
+	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
 	endpoints, opts, clusterName, err := ops.parseKvdbFromDaemonset()
 	if err != nil {
 		return err
 	}
 
-	logrus.Infof("creating kvdb client for: %v", endpoints)
+	logrus.Infof("Creating kvdb client for: %v", endpoints)
 	kvdbInst, err := getKVDBClient(endpoints, opts)
 	if err != nil {
 		return err
 	}
 
-	logrus.Infof("deleting Portworx kvdb tree: %s/%s for endpoint(s): %v", pxKvdbPrefix, clusterName, endpoints)
+	logrus.Infof("Deleting Portworx kvdb tree: %s/%s for endpoint(s): %v", pxKvdbPrefix, clusterName, endpoints)
 	return kvdbInst.DeleteTree(clusterName)
 }
 
@@ -787,7 +757,7 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents() error {
-	logrus.Infof("deleting all PX Kubernetes components from the cluster")
+	logrus.Infof("Deleting all PX Kubernetes components from the cluster")
 
 	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
 	if err != nil {
@@ -848,6 +818,139 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 
 	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
 	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+func (ops *pxClusterOps) runPXNodeWiper() error {
+	wiperName := "px-node-wiper"
+	trueVar := true
+	labels := map[string]string{
+		"name": wiperName,
+	}
+	args := []string{"-w"}
+	ds := &apps_api.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      wiperName,
+			Namespace: pxDefaultNamespace,
+			Labels:    labels,
+		},
+		Spec: apps_api.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            wiperName,
+							Image:           pxNodeWiperImage,
+							ImagePullPolicy: corev1.PullAlways,
+							Args:            args,
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &trueVar,
+							},
+							ReadinessProbe: &corev1.Probe{
+								InitialDelaySeconds: 30,
+								Handler: corev1.Handler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"cat", "/tmp/px-node-wipe-done"},
+									},
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "etcpwx",
+									MountPath: "/etc/pwx",
+								},
+								{
+									Name:      "hostproc1",
+									MountPath: "/hostproc/1/ns",
+								},
+								{
+									Name:      "optpwx",
+									MountPath: "/opt/pwx",
+								},
+							},
+						},
+					},
+					RestartPolicy:      "Always",
+					ServiceAccountName: talismanServiceAccount,
+					Volumes: []corev1.Volume{
+						{
+							Name: "etcpwx",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/etc/pwx",
+								},
+							},
+						},
+						{
+							Name: "hostproc1",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/proc/1/ns",
+								},
+							},
+						},
+						{
+							Name: "optpwx",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/opt/pwx",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return ops.runDaemonSet(ds, pxNodeWiperTimeout)
+}
+
+func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Duration) error {
+	err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	t := func() (interface{}, bool, error) {
+		_, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
+		if err == nil {
+			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", ds.Namespace, ds.Name)
+		}
+
+		return nil, false, nil
+	}
+
+	if _, err := task.DoRetryWithTimeout(t, daemonsetDeleteTimeout, defaultRetryInterval); err != nil {
+		return err
+	}
+
+	ds, err = ops.k8sOps.CreateDaemonSet(ds)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("Started daemonSet: [%s] %s", ds.Namespace, ds.Name)
+
+	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("Validated successfull run of daemonset: [%s] %s", ds.Namespace, ds.Name)
+
+	err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+	if err != nil {
+		logrus.Errorf("error while deleting daemonset: %v", err)
 		return err
 	}
 
