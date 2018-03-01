@@ -74,7 +74,7 @@ func doUpgrade() {
 
 	err = inst.Upgrade(newSpec, opts)
 	if err != nil {
-		logrus.Fatalf("failed to ugprade portworx to version: %v. err: %v", newPXImage, err)
+		logrus.Fatalf("failed to upgrade portworx to version: %v. err: %v", newOCIMonTag, err)
 	}
 }
 

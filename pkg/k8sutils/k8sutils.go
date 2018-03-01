@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	core_api "k8s.io/client-go/pkg/api/v1"
 	apps_api "k8s.io/client-go/pkg/apis/apps/v1beta1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -23,6 +24,7 @@ const (
 	deploymentUpdateTimeout  = 5 * time.Minute
 	statefulSetUpdateTimeout = 10 * time.Minute
 	defaultRetryInterval     = 10 * time.Second
+	pxStorageProvisionerName = "kubernetes.io/portworx-volume"
 )
 
 // Instance reperesents an instance of k8sutils
@@ -93,6 +95,32 @@ func (k *Instance) GetPXSharedApps() ([]apps_api.Deployment, []apps_api.Stateful
 	}
 
 	return sharedDeps, sharedSS, nil
+}
+
+// IsAnyPXAppPodUnmanaged checks if any application pod using PX volumes is not managed by a kubernetes controller
+func (k *Instance) IsAnyPXAppPodUnmanaged() (bool, error) {
+	pods, err := k.k8sOps.GetPodsUsingVolumePlugin(pxStorageProvisionerName)
+	if err != nil {
+		return false, fmt.Errorf("failed to get pods using %s. Err: %v", pxStorageProvisionerName, err)
+	}
+
+	var unManagedPods []core_api.Pod
+	for _, p := range pods {
+		if !k.k8sOps.IsPodBeingManaged(p) {
+			unManagedPods = append(unManagedPods, p)
+		}
+	}
+
+	if len(unManagedPods) > 0 {
+		logrus.Infof("Following pods are using Portworx and are not being managed by any controller:")
+		for _, p := range unManagedPods {
+			logrus.Infof("  pod name: %s namespace: %s", p.Name, p.Namespace)
+		}
+
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // GetPXSharedSCs returns all storage classes that have the shared parameter set to true
@@ -269,7 +297,6 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 				return nil, true, err
 			}
 
-			//sCopy = sCopy.DeepCopy()
 			if sCopy.Annotations == nil {
 				return nil, false, nil // done as this is not an app we touched
 			}
