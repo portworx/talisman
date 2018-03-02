@@ -298,7 +298,7 @@
     "k8s",
     "task"
   ]
-  revision = "e03a088b58101212468629d6d3442e5ad91b76e3"
+  revision = "b720a46d47d9f16f5be82640734033ced298021b"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
