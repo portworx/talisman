@@ -9,11 +9,11 @@ DOCKER_HUB_TAG ?= latest
 DOCKER_PULLER_IMG=$(DOCKER_HUB_REPO)/docker-puller:$(DOCKER_HUB_TAG)
 TALISMAN_IMG=$(DOCKER_HUB_REPO)/talisman:$(DOCKER_HUB_TAG)
 
-SHA := $(shell git rev-parse --short HEAD)
+SHA    := $(shell git rev-parse --short HEAD)
 BRANCH := $(subst /,-,$(shell git rev-parse --abbrev-ref HEAD))
-VER := $(shell git rev-parse --short HEAD)
-ARCH := $(shell go env GOARCH)
-GOOS := $(shell go env GOOS)
+VER    := $(shell git rev-parse --short HEAD)
+GO     := go
+GOENV  := GOOS=linux GOARCH=amd64
 DIR=.
 
 ifndef TAGS
@@ -30,12 +30,20 @@ else
 endif
 endif
 
-# Go setup
-GO=go
+LDFLAGS += -X github.com/portworx/talisman/pkg/version.Version=$(VERSION)
 
-# Sources and Targets
-# Build Binaries setting main.version and main.build vars
-LDFLAGS :=-ldflags "-X github.com/portworx/talisman/pkg/version.Version=$(VERSION) -extldflags '-z relro -z now'"
+BUILD_TYPE=static
+ifeq ($(BUILD_TYPE),static)
+    LDFLAGS += -extldflags -static
+    BUILD_OPTIONS += -v -a -ldflags "$(LDFLAGS)"
+    GOENV += CGO_ENABLED=0
+else ifeq ($(BUILD_TYPE),debug)
+    BUILD_OPTIONS += -i -v -gcflags "-N -l" -ldflags "$(LDFLAGS)"
+else
+    BUILD_OPTIONS += -i -v -ldflags "$(LDFLAGS)"
+endif
+
+
 PKGS=$(shell go list ./... | grep -v vendor)
 GOVET_PKGS=$(shell  go list ./... | grep -v vendor | grep -v pkg/client/informers/externalversions | grep -v versioned)
 
@@ -54,11 +62,11 @@ version:
 
 operator:
 	mkdir -p $(BIN)
-	go build $(LDFLAGS) -o $(BIN)/operator cmd/operator/main.go
+	go build $(BUILD_OPTIONS) -o $(BIN)/operator cmd/operator/main.go
 
 talisman:
 	mkdir -p $(BIN)
-	go build $(LDFLAGS) -o $(BIN)/talisman cmd/talisman/talisman.go
+	go build $(BUILD_OPTIONS) -o $(BIN)/talisman cmd/talisman/talisman.go
 
 test:
 	go test -tags "$(TAGS)" $(TESTFLAGS) $(PKGS)
