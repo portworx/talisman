@@ -62,11 +62,11 @@ version:
 
 operator:
 	mkdir -p $(BIN)
-	go build $(BUILD_OPTIONS) -o $(BIN)/operator cmd/operator/main.go
+	env $(GOENV) go build $(BUILD_OPTIONS) -o $(BIN)/operator cmd/operator/main.go
 
 talisman:
 	mkdir -p $(BIN)
-	go build $(BUILD_OPTIONS) -o $(BIN)/talisman cmd/talisman/talisman.go
+	env $(GOENV) go build $(BUILD_OPTIONS) -o $(BIN)/talisman cmd/talisman/talisman.go
 
 test:
 	go test -tags "$(TAGS)" $(TESTFLAGS) $(PKGS)
