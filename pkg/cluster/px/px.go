@@ -71,6 +71,7 @@ const (
 	storkSchedulerServiceAccount  = "stork-scheduler-account"
 	storkSchedulerName            = "stork-scheduler"
 	storkSnapshotStorageClass     = "stork-snapshot-sc"
+	pxNodeWiperDaemonSetName      = "px-node-wiper"
 	pxContainerName               = "portworx"
 	pxKvdbPrefix                  = "pwx/"
 )
@@ -247,6 +248,11 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 		err := ops.runPXNodeWiper()
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
+		} else {
+			err = ops.k8sOps.DeleteDaemonSet(pxNodeWiperDaemonSetName, pxDefaultNamespace)
+			if err != nil {
+				logrus.Warnf("Failed to delete PX node wiper daemonset. err: %v", err)
+			}
 		}
 
 		// 2. Cleanup PX kvdb tree
@@ -841,15 +847,14 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 }
 
 func (ops *pxClusterOps) runPXNodeWiper() error {
-	wiperName := "px-node-wiper"
 	trueVar := true
 	labels := map[string]string{
-		"name": wiperName,
+		"name": pxNodeWiperDaemonSetName,
 	}
 	args := []string{"-w"}
 	ds := &apps_api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      wiperName,
+			Name:      pxNodeWiperDaemonSetName,
 			Namespace: pxDefaultNamespace,
 			Labels:    labels,
 		},
@@ -864,7 +869,7 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:            wiperName,
+							Name:            pxNodeWiperDaemonSetName,
 							Image:           pxNodeWiperImage,
 							ImagePullPolicy: corev1.PullAlways,
 							Args:            args,
