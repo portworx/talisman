@@ -24,10 +24,6 @@
 #   go-tests = true
 #   unused-packages = true
 
-[[override]]
-  name = "github.com/libopenstorage/gossip"
-  branch = "logrus"
-
 [[constraint]]
   name = "k8s.io/api"
   branch = "release-1.8"
@@ -38,7 +34,7 @@
 
 [[constraint]]
   name = "github.com/libopenstorage/openstorage"
-  branch = "sirupsen-lowercase"
+  revision = "453be74da906d1676dca8924a339c5e25e20dce7"
 
 [[constraint]]
   name = "github.com/portworx/sched-ops"

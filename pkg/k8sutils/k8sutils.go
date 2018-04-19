@@ -4,6 +4,7 @@ package k8sutils
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/portworx/sched-ops/k8s"
@@ -99,7 +100,7 @@ func (k *Instance) GetPXSharedApps() ([]apps_api.Deployment, []apps_api.Stateful
 
 // IsAnyPXAppPodUnmanaged checks if any application pod using PX volumes is not managed by a kubernetes controller
 func (k *Instance) IsAnyPXAppPodUnmanaged() (bool, error) {
-	pods, err := k.k8sOps.GetPodsUsingVolumePlugin(pxStorageProvisionerName)
+	pods, err := k.getPodsUsingPX()
 	if err != nil {
 		return false, fmt.Errorf("failed to get pods using %s. Err: %v", pxStorageProvisionerName, err)
 	}
@@ -329,4 +330,68 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 	}
 
 	return nil
+}
+
+// getPodsUsingPX returns all pods using Portworx on given k8s node name
+func (k *Instance) getPodsUsingPX() ([]core_api.Pod, error) {
+	pods, err := k.k8sOps.GetPods("")
+	if err != nil {
+		return nil, err
+	}
+
+	pxPods := make([]core_api.Pod, 0)
+	for _, pod := range pods.Items {
+		usingPX, err := k.isPodUsingPxVolume(pod)
+		if err != nil {
+			return nil, err
+		}
+
+		if usingPX {
+			pxPods = append(pxPods, pod)
+		}
+	}
+
+	return pxPods, nil
+}
+
+// isPodUsingPxVolume inspects pod's volumes and checks it was a PX provisioned volume
+func (k *Instance) isPodUsingPxVolume(pod core_api.Pod) (bool, error) {
+	for _, vol := range pod.Spec.Volumes {
+		// check if pod uses a PX PV directly
+		if vol.PortworxVolume != nil {
+			return true, nil
+		}
+
+		if vol.PersistentVolumeClaim != nil {
+			pvc, err := k.k8sOps.GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
+			if err != nil {
+				return false, err
+			}
+
+			// check if pvc is using a PX pre-provisioned volume
+			pv, err := k.k8sOps.GetPersistentVolume(pvc.Spec.VolumeName)
+			if err != nil {
+				return false, err
+			}
+
+			if pv.Spec.PortworxVolume != nil {
+				return true, nil
+			}
+
+			// check if pvc is using a PX storage class
+			scName, err := k.k8sOps.GetStorageProvisionerForPVC(pvc)
+			if err != nil {
+				if strings.Contains(err.Error(), "does not have a storage class") {
+					continue
+				}
+
+				return false, err
+			}
+
+			if scName == pxStorageProvisionerName {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

@@ -135,6 +135,15 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/docker/spdystream"
+  packages = [
+    ".",
+    "spdy"
+  ]
+  revision = "bc6354cbbc295e925e4c611ffe90c1f287ee54db"
+
+[[projects]]
+  branch = "master"
   name = "github.com/dustin/go-humanize"
   packages = ["."]
   revision = "bb3d318650d48840a39aa21a027c6630e198e626"
@@ -357,7 +366,7 @@
   revision = "5ec20e01017609a74b1df23434a2b4506580459d"
 
 [[projects]]
-  branch = "logrus"
+  branch = "master"
   name = "github.com/libopenstorage/gossip"
   packages = [
     ".",
@@ -365,10 +374,9 @@
     "proto/state",
     "types"
   ]
-  revision = "4112ac59f59ac9cc2253e8100831a22c567cf7e3"
+  revision = "b3655d98ea02660f2e543d62f6af728a0c324116"
 
 [[projects]]
-  branch = "sirupsen-lowercase"
   name = "github.com/libopenstorage/openstorage"
   packages = [
     "api",
@@ -377,9 +385,11 @@
     "api/client/volume",
     "cluster",
     "config",
+    "osdconfig",
+    "pkg/dbg",
     "volume"
   ]
-  revision = "217b3616bdb5266ba3098f4f78e3f643e03a20f2"
+  revision = "453be74da906d1676dca8924a339c5e25e20dce7"
 
 [[projects]]
   branch = "master"
@@ -440,6 +450,7 @@
   version = "v0.8.0"
 
 [[projects]]
+  branch = "logrus-lowercase"
   name = "github.com/portworx/kvdb"
   packages = [
     ".",
@@ -450,7 +461,7 @@
     "etcd/v3",
     "mem"
   ]
-  revision = "d6ab05eb4a6d2e5132c0046d4e23f09775d0a738"
+  revision = "fb8ec703caad98c89d77a619c18eedf98bd1a242"
 
 [[projects]]
   branch = "master"
@@ -459,7 +470,7 @@
     "k8s",
     "task"
   ]
-  revision = "f164dd1fb79872a405d4b2ceb8beaf4335825a52"
+  revision = "75b0b0d161a5bc6b1e5d48c69e829260dc77e267"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -516,15 +527,6 @@
   packages = ["."]
   revision = "07dd2e8dfe18522e9c447ba95f2fe95262f63bb2"
   version = "0.0.1"
-
-[[projects]]
-  branch = "master"
-  name = "go.pedge.io/dlog"
-  packages = [
-    ".",
-    "logrus"
-  ]
-  revision = "259758e801e1eab2626d1c1f1767994f8e40e55a"
 
 [[projects]]
   branch = "master"
@@ -718,10 +720,13 @@
     "pkg/util/diff",
     "pkg/util/errors",
     "pkg/util/framer",
+    "pkg/util/httpstream",
+    "pkg/util/httpstream/spdy",
     "pkg/util/intstr",
     "pkg/util/json",
     "pkg/util/mergepatch",
     "pkg/util/net",
+    "pkg/util/remotecommand",
     "pkg/util/runtime",
     "pkg/util/sets",
     "pkg/util/strategicpatch",
@@ -732,6 +737,7 @@
     "pkg/version",
     "pkg/watch",
     "third_party/forked/golang/json",
+    "third_party/forked/golang/netutil",
     "third_party/forked/golang/reflect"
   ]
   revision = "4972c8e335e32ab65ba45bde0a99c6544c8a8e4c"
@@ -838,8 +844,11 @@
     "tools/pager",
     "tools/record",
     "tools/reference",
+    "tools/remotecommand",
     "transport",
+    "transport/spdy",
     "util/cert",
+    "util/exec",
     "util/flowcontrol",
     "util/homedir",
     "util/integer",
@@ -857,6 +866,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "a51c6eb3cfe919cd7050a2f245d371ad3a83cbf4c51f6d5ff9b3656e9182ef34"
+  inputs-digest = "6c586ee1eb8e8b53ed895407e6b4eddd83b90954d5315de2144fa67f91844a06"
   solver-name = "gps-cdcl"
   solver-version = 1
