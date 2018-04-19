@@ -244,8 +244,17 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 		// the wipe operation is best effort as it is used when cluster is already in a bad shape. for e.g
 		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
-		// 1. Wipe px from each node
-		err := ops.runPXNodeWiper()
+		// parse kvdb from daemonset before we delete it
+		logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
+		endpoints, opts, clusterName, kvdbParseErr := ops.parseKvdbFromDaemonset()
+
+		err := ops.deleteAllPXComponents()
+		if err != nil {
+			return err // this error is unexpected and should not be ignored
+		}
+
+		// Wipe px from each node
+		err = ops.runPXNodeWiper()
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		} else {
@@ -255,20 +264,23 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 			}
 		}
 
-		// 2. Cleanup PX kvdb tree
-		err = ops.wipePXKvdb()
-		if err != nil {
-			logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
+		if kvdbParseErr == nil {
+			// Cleanup PX kvdb tree
+			err = ops.wipePXKvdb(endpoints, opts, clusterName)
+			if err != nil {
+				logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
+			}
+		} else {
+			logrus.Warnf("failed to parse kvdb info. err: %v", kvdbParseErr)
 		}
 
+	} else {
+		// Just query all PX k8s components in cluster and delete them
+		err := ops.deleteAllPXComponents()
+		if err != nil {
+			return err
+		}
 	}
-
-	// 3. Query all PX k8s components in cluster and delete them
-	err := ops.deleteAllPXComponents()
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -697,11 +709,13 @@ func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
 	return daemonsetReadyTimeout, nil
 }
 
-func (ops *pxClusterOps) wipePXKvdb() error {
-	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	endpoints, opts, clusterName, err := ops.parseKvdbFromDaemonset()
-	if err != nil {
-		return err
+func (ops *pxClusterOps) wipePXKvdb(endpoints []string, opts map[string]string, clusterName string) error {
+	if len(endpoints) == 0 {
+		return fmt.Errorf("endpoints not supplied for wiping KVDB")
+	}
+
+	if len(clusterName) == 0 {
+		return fmt.Errorf("PX cluster name not supplied for wiping KVDB")
 	}
 
 	logrus.Infof("Creating kvdb client for: %v", endpoints)
