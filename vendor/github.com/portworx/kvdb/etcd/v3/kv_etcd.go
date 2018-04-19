@@ -514,23 +514,38 @@ retry:
 			Commit()
 		cancel()
 		if txnErr != nil {
-			if strings.Contains(txnErr.Error(), rpctypes.ErrGRPCTimeout.Error()) {
-				// server timeout
-				kvPair, err := et.Get(kvp.Key)
-				if err != nil {
+			// Check if we need to retry
+			switch txnErr {
+			case context.DeadlineExceeded, etcdserver.ErrTimeout, etcdserver.ErrUnhealthy:
+				logrus.Errorf("[cas %v]: kvdb error: %v, retry count: %v\n", key, txnErr, i)
+				time.Sleep(ec.DefaultIntervalBetweenRetries)
+			default:
+				if err == rpctypes.ErrGRPCEmptyKey {
+					return nil, kvdb.ErrNotFound
+				} else if strings.Contains(txnErr.Error(), rpctypes.ErrGRPCTimeout.Error()) {
+					logrus.Errorf("[cas: %v] kvdb grpc timeout: %v, retry count %v \n", key, txnErr, i)
+					time.Sleep(ec.DefaultIntervalBetweenRetries)
+				} else {
+					// For all other errors return immediately
 					return nil, txnErr
 				}
-				if kvPair.ModifiedIndex == kvp.ModifiedIndex {
-					// update did not succeed, retry
-					if i == (timeoutMaxRetry - 1) {
-						et.FatalCb("Too many server retries for CAS: %v", *kvp)
-					}
-					continue retry
-				} else if bytes.Compare(kvp.Value, kvPair.Value) == 0 {
-					return kvPair, nil
-				}
-				// else someone else updated the value, return error
 			}
+
+			// server timeout
+			kvPair, err := et.Get(kvp.Key)
+			if err != nil {
+				return nil, txnErr
+			}
+			if kvPair.ModifiedIndex == kvp.ModifiedIndex {
+				// update did not succeed, retry
+				if i == (timeoutMaxRetry - 1) {
+					et.FatalCb("Too many server retries for CAS: %v", *kvp)
+				}
+				continue retry
+			} else if bytes.Compare(kvp.Value, kvPair.Value) == 0 {
+				return kvPair, nil
+			}
+			// else someone else updated the value, return error
 			return nil, txnErr
 		}
 		if txnResponse.Succeeded == false {
@@ -637,13 +652,22 @@ func (et *etcdKV) LockWithID(key string, lockerID string) (
 	*kvdb.KVPair,
 	error,
 ) {
+	return et.LockWithTimeout(key, lockerID, kvdb.DefaultLockTryDuration, et.GetLockTimeout())
+}
+
+func (et *etcdKV) LockWithTimeout(
+	key string,
+	lockerID string,
+	lockTryDuration time.Duration,
+	lockHoldDuration time.Duration,
+) (*kvdb.KVPair, error) {
 	key = et.domain + key
 	duration := time.Second
 	ttl := uint64(ec.DefaultLockTTL)
-	count := 0
 	lockTag := ec.LockerIDInfo{LockerID: lockerID}
 	kvPair, err := et.Create(key, lockTag, ttl)
-	for maxCount := 300; err != nil && count < maxCount; count++ {
+	startTime := time.Now()
+	for count := 0; err != nil; count++ {
 		time.Sleep(duration)
 		kvPair, err = et.Create(key, lockTag, ttl)
 		if count > 0 && count%15 == 0 && err != nil {
@@ -653,16 +677,16 @@ func (et *etcdKV) LockWithID(key string, lockerID string) (
 					key, count, currLockerTag, err)
 			}
 		}
+		if err != nil && time.Since(startTime) > lockTryDuration {
+			return nil, err
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
-	if count >= 10 {
-		logrus.Warnf("ETCD: spent %v iterations locking %v\n", count, key)
-	}
 	kvPair.TTL = int64(ttl)
 	kvPair.Lock = &ec.EtcdLock{Done: make(chan struct{})}
-	go et.refreshLock(kvPair, lockerID)
+	go et.refreshLock(kvPair, lockerID, lockHoldDuration)
 	return kvPair, err
 }
 
@@ -819,7 +843,11 @@ out:
 	return nil, outErr
 }
 
-func (et *etcdKV) refreshLock(kvPair *kvdb.KVPair, tag string) {
+func (et *etcdKV) refreshLock(
+	kvPair *kvdb.KVPair,
+	tag string,
+	lockHoldDuration time.Duration,
+) {
 	l := kvPair.Lock.(*ec.EtcdLock)
 	ttl := kvPair.TTL
 	refresh := time.NewTicker(ec.DefaultLockRefreshDuration)
@@ -840,7 +868,7 @@ func (et *etcdKV) refreshLock(kvPair *kvdb.KVPair, tag string) {
 		case <-refresh.C:
 			l.Lock()
 			for !l.Unlocked {
-				et.CheckLockTimeout(lockMsgString, startTime)
+				et.CheckLockTimeout(lockMsgString, startTime, lockHoldDuration)
 				kvPair.TTL = ttl
 				kvp, err := et.CompareAndSet(
 					kvPair,
