@@ -32,8 +32,10 @@ import (
 type pxInstallType string
 
 const (
-	pxInstallTypeOCI    pxInstallType = "oci"
-	pxInstallTypeDocker pxInstallType = "docker"
+	pxInstallTypeOCI      pxInstallType = "oci"
+	pxInstallTypeDocker   pxInstallType = "docker"
+	pxInstallTypeNone     pxInstallType = "none"
+	changeCauseAnnotation               = "kubernetes.io/change-cause"
 )
 
 // SharedAppsScaleDownMode is type for choosing behavior of scaling down shared apps
@@ -72,7 +74,6 @@ const (
 	storkSchedulerName            = "stork-scheduler"
 	storkSnapshotStorageClass     = "stork-snapshot-sc"
 	pxNodeWiperDaemonSetName      = "px-node-wiper"
-	pxContainerName               = "portworx"
 	pxKvdbPrefix                  = "pwx/"
 )
 
@@ -474,12 +475,11 @@ func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.
 	var ociList, dockerList []apps_api.DaemonSet
 	for _, ds := range dss {
 		for _, c := range ds.Spec.Template.Spec.Containers {
-			if c.Name == pxContainerName {
-				if matched, _ := regexp.MatchString(".+oci-monitor.+", c.Image); matched {
-					ociList = append(ociList, ds)
-				} else {
-					dockerList = append(dockerList, ds)
-				}
+			if isPXOCIImage(c.Image) {
+				ociList = append(ociList, ds)
+				break
+			} else if isPXEnterpriseImage(c.Image) {
+				dockerList = append(dockerList, ds)
 				break
 			}
 		}
@@ -544,7 +544,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			dsCopy := ds.DeepCopy()
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
-				if c.Name == pxContainerName {
+				if isPXOCIImage(c.Image) {
 					if c.Image == newVersion {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, newVersion)
@@ -553,6 +553,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 					} else {
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration + 1
 						c.Image = newVersion
+						dsCopy.Annotations[changeCauseAnnotation] = fmt.Sprintf("update PX to %s", newVersion)
 					}
 					break
 				}
@@ -744,7 +745,7 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 	opts := make(map[string]string)
 
 	for _, c := range ds.Spec.Template.Spec.Containers {
-		if c.Name == pxContainerName {
+		if isPXOCIImage(c.Image) || isPXEnterpriseImage(c.Image) {
 			for i, arg := range c.Args {
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
@@ -1073,4 +1074,20 @@ func parseMajorMinorVersion(version string) (string, error) {
 	}
 
 	return matches[1], nil
+}
+
+// isPXOCIImage checks if given image name is an oci monitor image
+func isPXOCIImage(pxImageName string) bool {
+	matched, _ := regexp.MatchString(".*registry.connect.redhat.com/portworx/px-enterprise.+|.+oci-monitor.+", pxImageName)
+	return matched
+}
+
+// isPXEnterpriseImage checks if given image name is a px enterprise image
+func isPXEnterpriseImage(pxImageName string) bool {
+	if isPXOCIImage(pxImageName) { // workaround as golang doesn't have a negative match
+		return false
+	}
+
+	matched, _ := regexp.MatchString(".+px-enterprise.+", pxImageName)
+	return matched
 }
