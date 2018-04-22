@@ -50,6 +50,12 @@ const (
 	SharedAppsScaleDownOff SharedAppsScaleDownMode = "off"
 )
 
+var (
+	pxVersionRegex         = regexp.MustCompile(`^(\d+\.\d+).*`)
+	ociMonImageRegex       = regexp.MustCompile(".*registry.connect.redhat.com/portworx/px-enterprise.+|.+oci-monitor.+")
+	pxEnterpriseImageRegex = regexp.MustCompile(".+px-enterprise.+")
+)
+
 const (
 	pxDefaultNamespace            = "kube-system"
 	defaultPXImage                = "portworx/px-enterprise"
@@ -1068,7 +1074,7 @@ func getKVDBClient(endpoints []string, opts map[string]string) (kvdb.Kvdb, error
 }
 
 func parseMajorMinorVersion(version string) (string, error) {
-	matches := regexp.MustCompile(`^(\d+\.\d+).*`).FindStringSubmatch(version)
+	matches := pxVersionRegex.FindStringSubmatch(version)
 	if len(matches) != 2 {
 		return "", fmt.Errorf("failed to get PX major.minor version from %s", version)
 	}
@@ -1078,8 +1084,7 @@ func parseMajorMinorVersion(version string) (string, error) {
 
 // isPXOCIImage checks if given image name is an oci monitor image
 func isPXOCIImage(pxImageName string) bool {
-	matched, _ := regexp.MatchString(".*registry.connect.redhat.com/portworx/px-enterprise.+|.+oci-monitor.+", pxImageName)
-	return matched
+	return ociMonImageRegex.MatchString(pxImageName)
 }
 
 // isPXEnterpriseImage checks if given image name is a px enterprise image
@@ -1088,6 +1093,5 @@ func isPXEnterpriseImage(pxImageName string) bool {
 		return false
 	}
 
-	matched, _ := regexp.MatchString(".+px-enterprise.+", pxImageName)
-	return matched
+	return pxEnterpriseImageRegex.MatchString(pxImageName)
 }
