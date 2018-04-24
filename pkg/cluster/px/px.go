@@ -36,6 +36,7 @@ const (
 	pxInstallTypeDocker   pxInstallType = "docker"
 	pxInstallTypeNone     pxInstallType = "none"
 	changeCauseAnnotation               = "kubernetes.io/change-cause"
+	pxEnableLabelKey                    = "px/enabled"
 )
 
 // SharedAppsScaleDownMode is type for choosing behavior of scaling down shared apps
@@ -345,6 +346,27 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      pxEnableLabelKey,
+												Operator: corev1.NodeSelectorOpNotIn,
+												Values:   []string{"false"},
+											},
+											{
+												Key:      "node-role.kubernetes.io/master",
+												Operator: corev1.NodeSelectorOpDoesNotExist,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:            pullerName,
