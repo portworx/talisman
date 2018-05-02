@@ -677,7 +677,7 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn
 }
 
-// isMajorVersionUpgrade checks if this is a 1.2 to 1.3 upgradee
+// isMajorVersionUpgrade checks if this is a 1.2 to 1.3/1.4 upgradee
 func (ops *pxClusterOps) isMajorVersionUpgrade(spec *apiv1alpha1.Cluster) (bool, error) {
 	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
 	if err != nil {
@@ -692,7 +692,7 @@ func (ops *pxClusterOps) isMajorVersionUpgrade(spec *apiv1alpha1.Cluster) (bool,
 	logrus.Infof("Is any node running dublin version: %v. new version (major.minor): %s",
 		currentVersionDublin, newMajorMinor)
 
-	return currentVersionDublin && newMajorMinor == "1.3", nil
+	return currentVersionDublin && (newMajorMinor == "1.3" || newMajorMinor == "1.4"), nil
 }
 
 func (ops *pxClusterOps) preFlightChecks(spec *apiv1alpha1.Cluster) error {
