@@ -12,7 +12,7 @@ script:
   - make docker-build
 after_success:
   - if [ "${TRAVIS_PULL_REQUEST}" == "false" ]; then
-      docker login -u="${DOCKER_USER}" -p="${DOCKER_PASS}";
+      echo "${DOCKER_PASS}" | docker login -u="${DOCKER_USER}" --password-stdin;
       if [ "${TRAVIS_BRANCH}" == "master" ]; then
         make deploy;
       elif [ "${TRAVIS_BRANCH}" == "1.7" ]; then
