@@ -53,7 +53,7 @@ const (
 
 var (
 	pxVersionRegex         = regexp.MustCompile(`^(\d+\.\d+).*`)
-	ociMonImageRegex       = regexp.MustCompile(".*registry.connect.redhat.com/portworx/px-enterprise.+|.+oci-monitor.+")
+	ociMonImageRegex       = regexp.MustCompile(`.*registry.connect.redhat.com/portworx/(px-enterprise|px-monitor).+|.+oci-monitor.+`)
 	pxEnterpriseImageRegex = regexp.MustCompile(".+px-enterprise.+")
 )
 
@@ -933,8 +933,8 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 									MountPath: "/etc/pwx",
 								},
 								{
-									Name:      "hostproc1",
-									MountPath: "/hostproc/1/ns",
+									Name:      "hostproc",
+									MountPath: "/hostproc",
 								},
 								{
 									Name:      "optpwx",
@@ -955,10 +955,10 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 							},
 						},
 						{
-							Name: "hostproc1",
+							Name: "hostproc",
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/proc/1/ns",
+									Path: "/proc",
 								},
 							},
 						},
