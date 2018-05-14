@@ -1,8 +1,6 @@
-FROM golang:1.9.1
+FROM golang:1.9.3
 MAINTAINER harsh@portworx.com
 
 RUN mkdir -p /go/src/github.com/portworx/talisman
-
-RUN go get "k8s.io/apimachinery/pkg/apimachinery/registered"
 
 WORKDIR /go/src/github.com/portworx/talisman
