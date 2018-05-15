@@ -218,6 +218,7 @@ func (ops *pxClusterOps) Destroy(c *apiv1alpha1.Cluster) error {
 // runDockerPuller runs the DaemonSet to start pulling the given image on all nodes
 func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 	stripSpecialRegex, _ := regexp.Compile("[^a-zA-Z0-9]+")
+	trueVar := true
 
 	pullerName := fmt.Sprintf("docker-puller-%s", stripSpecialRegex.ReplaceAllString(imageToPull, ""))
 
@@ -289,6 +290,9 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 									Name:      "varrun",
 									MountPath: "/var/run/",
 								},
+							},
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &trueVar,
 							},
 						},
 					},
