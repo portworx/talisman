@@ -59,6 +59,7 @@ var (
 
 const (
 	pxDefaultNamespace            = "kube-system"
+	pxSecretsNamespace            = "portworx"
 	defaultPXImage                = "portworx/px-enterprise"
 	dockerPullerImage             = "portworx/docker-puller:latest"
 	pxNodeWiperImage              = "portworx/px-node-wiper:latest"
@@ -66,6 +67,8 @@ const (
 	pxServiceName                 = "portworx-service"
 	pxClusterRoleName             = "node-get-put-list-role"
 	pxClusterRoleBindingName      = "node-role-binding"
+	pxRoleName                    = "px-role"
+	pxRoleBindingName             = "px-role-binding"
 	pxServiceAccountName          = "px-account"
 	pxVersionLabel                = "PX Version"
 	talismanServiceAccount        = "talisman-account"
@@ -529,7 +532,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	var err error
 
 	// update RBAC cluster role
-	role := &rbacv1.ClusterRole{
+	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: pxClusterRoleName,
 		},
@@ -552,8 +555,14 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 		},
 	}
 
-	role, err = ops.k8sOps.UpdateClusterRole(role)
+	logrus.Infof("Updating [%s] cluster role", pxClusterRoleName)
+	_, err = ops.k8sOps.UpdateClusterRole(clusterRole)
 	if err != nil {
+		return err
+	}
+
+	// create or update Kubernetes secrets permissions
+	if err := ops.updatePxSecretsPermissions(); err != nil {
 		return err
 	}
 
@@ -648,6 +657,85 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	}
 
 	return nil
+}
+
+// updatePxSecretsPermissions will update the permissions needed by PX to access secrets
+func (ops *pxClusterOps) updatePxSecretsPermissions() error {
+	// create px namespace to store secrets
+	logrus.Infof("Creating [%s] namespace", pxSecretsNamespace)
+	_, err := ops.k8sOps.CreateNamespace(pxSecretsNamespace, nil)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return err
+	}
+
+	// update RBAC role
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pxRoleName,
+			Namespace: pxSecretsNamespace,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get", "list", "create", "update", "patch"},
+			},
+		},
+	}
+
+	logrus.Infof("Updating [%s] role in [%s] namespace", pxRoleName, pxSecretsNamespace)
+	if err := ops.createOrUpdateRole(role); err != nil {
+		return err
+	}
+
+	// update RBAC role binding
+	roleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pxRoleBindingName,
+			Namespace: pxSecretsNamespace,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      pxServiceAccountName,
+				Namespace: pxDefaultNamespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			Kind:     "Role",
+			Name:     pxRoleName,
+			APIGroup: "rbac.authorization.k8s.io",
+		},
+	}
+
+	logrus.Infof("Updating [%s] rolebinding in [%s] namespace", pxRoleBindingName, pxSecretsNamespace)
+	if err := ops.createOrUpdateRoleBinding(roleBinding); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// createOrUpdateRole creates a given role or updates if it already exists
+func (ops *pxClusterOps) createOrUpdateRole(role *rbacv1.Role) error {
+	_, err := ops.k8sOps.CreateRole(role)
+	if errors.IsAlreadyExists(err) {
+		if _, err = ops.k8sOps.UpdateRole(role); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+// createOrUpdateRoleBinding creates a given role binding or updates if it already exists
+func (ops *pxClusterOps) createOrUpdateRoleBinding(binding *rbacv1.RoleBinding) error {
+	_, err := ops.k8sOps.CreateRoleBinding(binding)
+	if errors.IsAlreadyExists(err) {
+		if _, err = ops.k8sOps.UpdateRoleBinding(binding); err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 // isAnyNodeRunningVersionWithPrefix checks if any node in the cluster has a PX version with given prefix

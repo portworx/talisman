@@ -470,7 +470,7 @@
     "k8s",
     "task"
   ]
-  revision = "75b0b0d161a5bc6b1e5d48c69e829260dc77e267"
+  revision = "e029c8279bb408012b8e631f32fde8a1493f2268"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
