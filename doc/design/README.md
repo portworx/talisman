@@ -1,3 +1,3 @@
 # Design documents
 
-* [Controller loop](#CONTROLLER.md)
+* [Controller loop](CONTROLLER.md)
