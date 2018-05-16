@@ -58,33 +58,37 @@ var (
 )
 
 const (
-	pxDefaultNamespace            = "kube-system"
-	pxSecretsNamespace            = "portworx"
-	defaultPXImage                = "portworx/px-enterprise"
-	dockerPullerImage             = "portworx/docker-puller:latest"
-	pxNodeWiperImage              = "portworx/px-node-wiper:latest"
-	pxdRestPort                   = 9001
-	pxServiceName                 = "portworx-service"
-	pxClusterRoleName             = "node-get-put-list-role"
-	pxClusterRoleBindingName      = "node-role-binding"
-	pxRoleName                    = "px-role"
-	pxRoleBindingName             = "px-role-binding"
-	pxServiceAccountName          = "px-account"
-	pxVersionLabel                = "PX Version"
-	talismanServiceAccount        = "talisman-account"
-	storkControllerName           = "stork"
-	storkServiceName              = "stork-service"
-	storkControllerConfigMap      = "stork-config"
-	storkControllerClusterRole    = "stork-role"
-	storkControllerClusterBinding = "stork-role-binding"
-	storkControllerServiceAccount = "stork-account"
-	storkSchedulerClusterRole     = "stork-scheduler-role"
-	storkSchedulerCluserBinding   = "stork-scheduler-role-binding"
-	storkSchedulerServiceAccount  = "stork-scheduler-account"
-	storkSchedulerName            = "stork-scheduler"
-	storkSnapshotStorageClass     = "stork-snapshot-sc"
-	pxNodeWiperDaemonSetName      = "px-node-wiper"
-	pxKvdbPrefix                  = "pwx/"
+	pxDefaultNamespace              = "kube-system"
+	pxSecretsNamespace              = "portworx"
+	defaultPXImage                  = "portworx/px-enterprise"
+	dockerPullerImage               = "portworx/docker-puller:latest"
+	pxNodeWiperImage                = "portworx/px-node-wiper:latest"
+	pxdRestPort                     = 9001
+	pxServiceName                   = "portworx-service"
+	pxClusterRoleName               = "node-get-put-list-role"
+	pxClusterRoleBindingName        = "node-role-binding"
+	pxRoleName                      = "px-role"
+	pxRoleBindingName               = "px-role-binding"
+	pxServiceAccountName            = "px-account"
+	pvcControllerClusterRole        = "portworx-pvc-controller-role"
+	pvcControllerClusterRoleBinding = "portworx-pvc-controller-role-binding"
+	pvcControllerServiceAccount     = "portworx-pvc-controller-account"
+	pvcControllerName               = "portworx-pvc-controller"
+	pxVersionLabel                  = "PX Version"
+	talismanServiceAccount          = "talisman-account"
+	storkControllerName             = "stork"
+	storkServiceName                = "stork-service"
+	storkControllerConfigMap        = "stork-config"
+	storkControllerClusterRole      = "stork-role"
+	storkControllerClusterBinding   = "stork-role-binding"
+	storkControllerServiceAccount   = "stork-account"
+	storkSchedulerClusterRole       = "stork-scheduler-role"
+	storkSchedulerCluserBinding     = "stork-scheduler-role-binding"
+	storkSchedulerServiceAccount    = "stork-scheduler-account"
+	storkSchedulerName              = "stork-scheduler"
+	storkSnapshotStorageClass       = "stork-snapshot-sc"
+	pxNodeWiperDaemonSetName        = "px-node-wiper"
+	pxKvdbPrefix                    = "pwx/"
 )
 
 type pxClusterOps struct {
@@ -709,11 +713,7 @@ func (ops *pxClusterOps) updatePxSecretsPermissions() error {
 	}
 
 	logrus.Infof("Updating [%s] rolebinding in [%s] namespace", pxRoleBindingName, pxSecretsNamespace)
-	if err := ops.createOrUpdateRoleBinding(roleBinding); err != nil {
-		return err
-	}
-
-	return nil
+	return ops.createOrUpdateRoleBinding(roleBinding)
 }
 
 // createOrUpdateRole creates a given role or updates if it already exists
@@ -928,7 +928,11 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	depNames := [2]string{storkControllerName, storkSchedulerName}
+	depNames := [3]string{
+		storkControllerName,
+		storkSchedulerName,
+		pvcControllerName,
+	}
 	for _, depName := range depNames {
 		err = ops.k8sOps.DeleteDeployment(depName, pxDefaultNamespace)
 		if err != nil && !errors.IsNotFound(err) {
@@ -936,7 +940,12 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	clusterRoles := [3]string{pxClusterRoleName, storkControllerClusterRole, storkSchedulerClusterRole}
+	clusterRoles := [4]string{
+		pxClusterRoleName,
+		storkControllerClusterRole,
+		storkSchedulerClusterRole,
+		pvcControllerClusterRole,
+	}
 	for _, role := range clusterRoles {
 		err = ops.k8sOps.DeleteClusterRole(role)
 		if err != nil && !errors.IsNotFound(err) {
@@ -944,7 +953,12 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	bindings := [3]string{pxClusterRoleBindingName, storkControllerClusterBinding, storkSchedulerCluserBinding}
+	bindings := [4]string{
+		pxClusterRoleBindingName,
+		storkControllerClusterBinding,
+		storkSchedulerCluserBinding,
+		pvcControllerClusterRoleBinding,
+	}
 	for _, binding := range bindings {
 		err = ops.k8sOps.DeleteClusterRoleBinding(binding)
 		if err != nil && !errors.IsNotFound(err) {
@@ -952,7 +966,12 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	accounts := [3]string{pxServiceAccountName, storkControllerServiceAccount, storkSchedulerServiceAccount}
+	accounts := [4]string{
+		pxServiceAccountName,
+		storkControllerServiceAccount,
+		storkSchedulerServiceAccount,
+		pvcControllerServiceAccount,
+	}
 	for _, acc := range accounts {
 		err = ops.k8sOps.DeleteServiceAccount(acc, pxDefaultNamespace)
 		if err != nil && !errors.IsNotFound(err) {
