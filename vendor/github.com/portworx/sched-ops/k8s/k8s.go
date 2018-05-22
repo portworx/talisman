@@ -224,6 +224,10 @@ type RBACOps interface {
 	CreateClusterRoleBinding(role *rbac_v1.ClusterRoleBinding) (*rbac_v1.ClusterRoleBinding, error)
 	// CreateServiceAccount creates the given service account
 	CreateServiceAccount(account *v1.ServiceAccount) (*v1.ServiceAccount, error)
+	// DeleteRole deletes the given role
+	DeleteRole(name, namespace string) error
+	// DeleteRoleBinding deletes the given role binding
+	DeleteRoleBinding(name, namespace string) error
 	// DeleteClusterRole deletes the given cluster role
 	DeleteClusterRole(roleName string) error
 	// DeleteClusterRoleBinding deletes the given cluster role binding
@@ -335,10 +339,12 @@ type SecretOps interface {
 	GetSecret(name string, namespace string) (*v1.Secret, error)
 	// CreateSecret creates the given secret
 	CreateSecret(*v1.Secret) (*v1.Secret, error)
-	// UpdateSecret updates the gives secret
+	// UpdateSecret updates the given secret
 	UpdateSecret(*v1.Secret) (*v1.Secret, error)
 	// UpdateSecretData updates or creates a new secret with the given data
 	UpdateSecretData(string, string, map[string][]byte) (*v1.Secret, error)
+	// DeleteSecret deletes the given secret
+	DeleteSecret(name, namespace string) error
 }
 
 // ConfigMapOps is an interface to perform k8s ConfigMap operations
@@ -1160,7 +1166,7 @@ func (k *k8sOps) CreateDaemonSet(ds *apps_api.DaemonSet) (*apps_api.DaemonSet, e
 		return nil, err
 	}
 
-	return k.client.Apps().DaemonSets(ds.Namespace).Create(ds)
+	return k.appsClient().DaemonSets(ds.Namespace).Create(ds)
 }
 
 func (k *k8sOps) ListDaemonSets(namespace string, listOpts meta_v1.ListOptions) ([]apps_api.DaemonSet, error) {
@@ -1168,7 +1174,7 @@ func (k *k8sOps) ListDaemonSets(namespace string, listOpts meta_v1.ListOptions) 
 		return nil, err
 	}
 
-	dsList, err := k.client.Apps().DaemonSets(namespace).List(listOpts)
+	dsList, err := k.appsClient().DaemonSets(namespace).List(listOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -1297,7 +1303,7 @@ func (k *k8sOps) DeleteDaemonSet(name, namespace string) error {
 	}
 
 	policy := meta_v1.DeletePropagationForeground
-	return k.client.Apps().DaemonSets(namespace).Delete(
+	return k.appsClient().DaemonSets(namespace).Delete(
 		name,
 		&meta_v1.DeleteOptions{PropagationPolicy: &policy})
 }
@@ -1667,12 +1673,32 @@ func (k *k8sOps) CreateServiceAccount(account *v1.ServiceAccount) (*v1.ServiceAc
 	return k.client.Core().ServiceAccounts(account.Namespace).Create(account)
 }
 
+func (k *k8sOps) DeleteRole(name, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Rbac().Roles(namespace).Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
 func (k *k8sOps) DeleteClusterRole(roleName string) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
 	}
 
 	return k.client.Rbac().ClusterRoles().Delete(roleName, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) DeleteRoleBinding(name, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.Rbac().RoleBindings(namespace).Delete(name, &meta_v1.DeleteOptions{
 		PropagationPolicy: &deleteForegroundPolicy,
 	})
 }
@@ -2322,6 +2348,16 @@ func (k *k8sOps) UpdateSecretData(name string, ns string, data map[string][]byte
 		secret.Data[k] = v
 	}
 	return k.UpdateSecret(secret)
+}
+
+func (k *k8sOps) DeleteSecret(name, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.client.CoreV1().Secrets(namespace).Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
 }
 
 // Secret APIs - END
