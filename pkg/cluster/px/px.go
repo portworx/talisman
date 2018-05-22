@@ -70,6 +70,12 @@ const (
 	pxRoleName                      = "px-role"
 	pxRoleBindingName               = "px-role-binding"
 	pxServiceAccountName            = "px-account"
+	lhRoleName                      = "px-lh-role"
+	lhRoleBindingName               = "px-lh-role-binding"
+	lhServiceAccountName            = "px-lh-account"
+	lhConfigMap                     = "px-lighthouse-config"
+	lhServiceName                   = "px-lighthouse"
+	lhDeploymentName                = "px-lighthouse"
 	pvcControllerClusterRole        = "portworx-pvc-controller-role"
 	pvcControllerClusterRoleBinding = "portworx-pvc-controller-role-binding"
 	pvcControllerServiceAccount     = "portworx-pvc-controller-account"
@@ -255,21 +261,20 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 }
 
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
+	// parse kvdb from daemonset before we delete it
+	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
+	endpoints, kvdbOpts, clusterName, kvdbParseErr := ops.parseKvdbFromDaemonset()
+
+	if err := ops.deleteAllPXComponents(clusterName); err != nil {
+		return err // this error is unexpected and should not be ignored
+	}
+
 	if opts != nil && opts.WipeCluster {
 		// the wipe operation is best effort as it is used when cluster is already in a bad shape. for e.g
 		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
-		// parse kvdb from daemonset before we delete it
-		logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-		endpoints, opts, clusterName, kvdbParseErr := ops.parseKvdbFromDaemonset()
-
-		err := ops.deleteAllPXComponents()
-		if err != nil {
-			return err // this error is unexpected and should not be ignored
-		}
-
 		// Wipe px from each node
-		err = ops.runPXNodeWiper()
+		err := ops.runPXNodeWiper()
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		} else {
@@ -281,7 +286,7 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 
 		if kvdbParseErr == nil {
 			// Cleanup PX kvdb tree
-			err = ops.wipePXKvdb(endpoints, opts, clusterName)
+			err = ops.wipePXKvdb(endpoints, kvdbOpts, clusterName)
 			if err != nil {
 				logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
 			}
@@ -289,13 +294,8 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 			logrus.Warnf("failed to parse kvdb info. err: %v", kvdbParseErr)
 		}
 
-	} else {
-		// Just query all PX k8s components in cluster and delete them
-		err := ops.deleteAllPXComponents()
-		if err != nil {
-			return err
-		}
 	}
+
 	return nil
 }
 
@@ -913,7 +913,7 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 	return endpoints, opts, clusterName, nil
 }
 
-func (ops *pxClusterOps) deleteAllPXComponents() error {
+func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	logrus.Infof("Deleting all PX Kubernetes components from the cluster")
 
 	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
@@ -928,16 +928,45 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	depNames := [3]string{
+	depNames := [4]string{
 		storkControllerName,
 		storkSchedulerName,
 		pvcControllerName,
+		lhDeploymentName,
 	}
 	for _, depName := range depNames {
 		err = ops.k8sOps.DeleteDeployment(depName, pxDefaultNamespace)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
+	}
+
+	roles := [2][2]string{
+		{pxRoleName, pxSecretsNamespace},
+		{lhRoleName, pxDefaultNamespace},
+	}
+	for _, role := range roles {
+		err = ops.k8sOps.DeleteRole(role[0], role[1])
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	roleBindings := [2][2]string{
+		{pxRoleBindingName, pxSecretsNamespace},
+		{lhRoleBindingName, pxDefaultNamespace},
+	}
+	for _, binding := range roleBindings {
+		err = ops.k8sOps.DeleteRoleBinding(binding[0], binding[1])
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	clusterWideSecret := strings.Replace(clusterName+"_px_secret", "_", "-", -1)
+	err = ops.k8sOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
 	}
 
 	clusterRoles := [4]string{
@@ -953,21 +982,22 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	bindings := [4]string{
+	clusterRoleBindings := [4]string{
 		pxClusterRoleBindingName,
 		storkControllerClusterBinding,
 		storkSchedulerCluserBinding,
 		pvcControllerClusterRoleBinding,
 	}
-	for _, binding := range bindings {
+	for _, binding := range clusterRoleBindings {
 		err = ops.k8sOps.DeleteClusterRoleBinding(binding)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 	}
 
-	accounts := [4]string{
+	accounts := [5]string{
 		pxServiceAccountName,
+		lhServiceAccountName,
 		storkControllerServiceAccount,
 		storkSchedulerServiceAccount,
 		pvcControllerServiceAccount,
@@ -979,7 +1009,11 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	services := [2]string{pxServiceName, storkServiceName}
+	services := [3]string{
+		pxServiceName,
+		storkServiceName,
+		lhServiceName,
+	}
 	for _, svc := range services {
 		err = ops.k8sOps.DeleteService(svc, pxDefaultNamespace)
 		if err != nil && !errors.IsNotFound(err) {
@@ -987,9 +1021,15 @@ func (ops *pxClusterOps) deleteAllPXComponents() error {
 		}
 	}
 
-	err = ops.k8sOps.DeleteConfigMap(storkControllerConfigMap, pxDefaultNamespace)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
+	configMaps := [2]string{
+		lhConfigMap,
+		storkControllerConfigMap,
+	}
+	for _, cm := range configMaps {
+		err = ops.k8sOps.DeleteConfigMap(cm, pxDefaultNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
 	}
 
 	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
@@ -1121,7 +1161,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 		return err
 	}
 
-	logrus.Infof("Validated successfull run of daemonset: [%s] %s", ds.Namespace, ds.Name)
+	logrus.Infof("Validated successful run of daemonset: [%s] %s", ds.Namespace, ds.Name)
 
 	err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
 	if err != nil {
