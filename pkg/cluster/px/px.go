@@ -784,7 +784,7 @@ func (ops *pxClusterOps) doesUpgradeNeedAppDrain(spec *apiv1alpha1.Cluster) (boo
 	logrus.Infof("Is any node running dublin version: %v. new version: %s", currentVersionDublin, newVersion)
 
 	if strings.HasPrefix(newVersion, "1.3.3") {
-		// 1.3.3 has a change that requires a reboot even if starting version is dublin
+		// 1.3.3 has a change that requires a reboot even if starting version is not dublin
 		return true, nil
 	}
 
