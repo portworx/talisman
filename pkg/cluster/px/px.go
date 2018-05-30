@@ -43,6 +43,10 @@ const (
 	SharedAppsScaleDownOff SharedAppsScaleDownMode = "off"
 )
 
+var (
+	pxVersionRegex = regexp.MustCompile(`^(\d+\.\d+\.\d+).*`)
+)
+
 const (
 	defaultPXImage         = "portworx/px-enterprise"
 	pxDefaultNamespace     = "kube-system"
@@ -150,12 +154,12 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 	newOCIMonVer := fmt.Sprintf("%s:%s", new.Spec.OCIMonImage, new.Spec.OCIMonTag)
 	newPXVer := fmt.Sprintf("%s:%s", new.Spec.PXImage, new.Spec.PXTag)
 
-	isMajorVerUpgrade, err := ops.isMajorVersionUpgrade(new)
+	isAppDrainNeeded, err := ops.doesUpgradeNeedAppDrain(new)
 	if err != nil {
 		return err
 	}
 
-	if isMajorVerUpgrade {
+	if isAppDrainNeeded {
 		unManaged, err := ops.utils.IsAnyPXAppPodUnmanaged()
 		if err != nil {
 			return err
@@ -167,7 +171,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 		}
 	}
 
-	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v", newOCIMonVer, opts)
+	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v App drain requirement: %v", newOCIMonVer, opts, isAppDrainNeeded)
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
 	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
@@ -179,7 +183,7 @@ func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions)
 	}
 
 	// 2. (Optional) Scale down px shared applications to 0 replicas if required based on opts
-	if ops.isScaleDownOfSharedAppsRequired(isMajorVerUpgrade, opts) {
+	if ops.isScaleDownOfSharedAppsRequired(isAppDrainNeeded, opts) {
 		defer func() { // always restore the replicas
 			err = ops.utils.RestoreScaledAppsReplicas()
 			if err != nil {
@@ -617,22 +621,26 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn
 }
 
-// isMajorVersionUpgrade checks if this is a 1.2 to 1.3/1.4 upgradee
-func (ops *pxClusterOps) isMajorVersionUpgrade(spec *apiv1alpha1.Cluster) (bool, error) {
+// doesUpgradeNeedAppDrain checks if target is 1.3.3 or upgrade is from 1.2 to 1.3/1.4
+func (ops *pxClusterOps) doesUpgradeNeedAppDrain(spec *apiv1alpha1.Cluster) (bool, error) {
 	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
 	if err != nil {
 		return false, err
 	}
 
-	newMajorMinor, err := parseMajorMinorVersion(spec.Spec.OCIMonTag)
+	newVersion, err := parsePXVersion(spec.Spec.OCIMonTag)
 	if err != nil {
 		return false, err
 	}
 
-	logrus.Infof("Is any node running dublin version: %v. new version (major.minor): %s",
-		currentVersionDublin, newMajorMinor)
+	logrus.Infof("Is any node running dublin version: %v. new version: %s", currentVersionDublin, newVersion)
 
-	return currentVersionDublin && (newMajorMinor == "1.3" || newMajorMinor == "1.4"), nil
+	if strings.HasPrefix(newVersion, "1.3.3") {
+		// 1.3.3 has a change that requires a reboot even if starting version is dublin
+		return true, nil
+	}
+
+	return currentVersionDublin && (strings.HasPrefix(newVersion, "1.3") || strings.HasPrefix(newVersion, "1.4")), nil
 }
 
 func (ops *pxClusterOps) preFlightChecks(spec *apiv1alpha1.Cluster) error {
@@ -678,10 +686,10 @@ func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
 	return daemonsetReadyTimeout, nil
 }
 
-func parseMajorMinorVersion(version string) (string, error) {
-	matches := regexp.MustCompile(`^(\d+\.\d+).*`).FindStringSubmatch(version)
+func parsePXVersion(version string) (string, error) {
+	matches := pxVersionRegex.FindStringSubmatch(version)
 	if len(matches) != 2 {
-		return "", fmt.Errorf("failed to get PX major.minor version from %s", version)
+		return "", fmt.Errorf("failed to get PX version from %s", version)
 	}
 
 	return matches[1], nil
