@@ -180,27 +180,27 @@ func (ops *pxClusterOps) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterSta
 	return nil, nil
 }
 
-func (ops *pxClusterOps) Upgrade(new *apiv1alpha1.Cluster, opts *UpgradeOptions) error {
-	if new == nil {
+func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOptions) error {
+	if newSpec == nil {
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
 
-	if err := ops.preFlightChecks(new); err != nil {
+	if err := ops.preFlightChecks(newSpec); err != nil {
 		return err
 	}
 
-	if len(new.Spec.PXImage) == 0 {
-		new.Spec.PXImage = defaultPXImage
+	if len(newSpec.Spec.PXImage) == 0 {
+		newSpec.Spec.PXImage = defaultPXImage
 	}
 
-	if len(new.Spec.PXTag) == 0 {
-		new.Spec.PXTag = new.Spec.OCIMonTag
+	if len(newSpec.Spec.PXTag) == 0 {
+		newSpec.Spec.PXTag = newSpec.Spec.OCIMonTag
 	}
 
-	newOCIMonVer := fmt.Sprintf("%s:%s", new.Spec.OCIMonImage, new.Spec.OCIMonTag)
-	newPXVer := fmt.Sprintf("%s:%s", new.Spec.PXImage, new.Spec.PXTag)
+	newOCIMonVer := fmt.Sprintf("%s:%s", newSpec.Spec.OCIMonImage, newSpec.Spec.OCIMonTag)
+	newPXVer := fmt.Sprintf("%s:%s", newSpec.Spec.PXImage, newSpec.Spec.PXTag)
 
-	isAppDrainNeeded, err := ops.doesUpgradeNeedAppDrain(new)
+	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec)
 	if err != nil {
 		return err
 	}
@@ -769,8 +769,8 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn
 }
 
-// doesUpgradeNeedAppDrain checks if target is 1.3.3 or upgrade is from 1.2 to 1.3/1.4
-func (ops *pxClusterOps) doesUpgradeNeedAppDrain(spec *apiv1alpha1.Cluster) (bool, error) {
+// isUpgradeAppDrainRequired checks if target is 1.3.3 or upgrade is from 1.2 to 1.3/1.4
+func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster) (bool, error) {
 	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
 	if err != nil {
 		return false, err
