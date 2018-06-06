@@ -769,7 +769,7 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 	return opts.SharedAppsScaleDown == SharedAppsScaleDownOn
 }
 
-// isUpgradeAppDrainRequired checks if target is 1.3.3 or upgrade is from 1.2 to 1.3/1.4
+// isUpgradeAppDrainRequired checks if target is 1.3.3/1.3.4 or upgrade is from 1.2 to 1.3/1.4
 func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster) (bool, error) {
 	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
 	if err != nil {
@@ -783,8 +783,8 @@ func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster) (b
 
 	logrus.Infof("Is any node running dublin version: %v. new version: %s", currentVersionDublin, newVersion)
 
-	if strings.HasPrefix(newVersion, "1.3.3") {
-		// 1.3.3 has a change that requires a reboot even if starting version is not dublin
+	if strings.HasPrefix(newVersion, "1.3.3") || strings.HasPrefix(newVersion, "1.3.4") {
+		// 1.3.3/1.3.4 has a change that requires a reboot even if starting version is not dublin
 		return true, nil
 	}
 
