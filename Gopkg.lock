@@ -393,6 +393,18 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/libopenstorage/stork"
+  packages = [
+    "pkg/apis/stork.com",
+    "pkg/apis/stork.com/v1alpha1",
+    "pkg/client/clientset/versioned",
+    "pkg/client/clientset/versioned/scheme",
+    "pkg/client/clientset/versioned/typed/stork.com/v1alpha1"
+  ]
+  revision = "ab453b9161a1446526d8563d00fccfa55c418bf1"
+
+[[projects]]
+  branch = "master"
   name = "github.com/libopenstorage/systemutils"
   packages = ["."]
   revision = "dc0e35340804a0ada0792a3c9ce51d33ddd53cc8"
@@ -470,7 +482,7 @@
     "k8s",
     "task"
   ]
-  revision = "31142a6adec41767f0f72cc7094ba2cc422b4ef9"
+  revision = "56eea9523c3af767d72a9773bad60d313980672c"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"

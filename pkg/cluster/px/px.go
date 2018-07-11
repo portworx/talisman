@@ -31,6 +31,8 @@ import (
 
 type pxInstallType string
 
+var errUsingInternalEtcd = fmt.Errorf("cluster is using internal etcd")
+
 const (
 	pxInstallTypeOCI      pxInstallType = "oci"
 	pxInstallTypeDocker   pxInstallType = "docker"
@@ -277,11 +279,6 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 		err := ops.runPXNodeWiper()
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
-		} else {
-			err = ops.k8sOps.DeleteDaemonSet(pxNodeWiperDaemonSetName, pxDefaultNamespace)
-			if err != nil {
-				logrus.Warnf("Failed to delete PX node wiper daemonset. err: %v", err)
-			}
 		}
 
 		if kvdbParseErr == nil {
@@ -291,7 +288,11 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 				logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
 			}
 		} else {
-			logrus.Warnf("failed to parse kvdb info. err: %v", kvdbParseErr)
+			if kvdbParseErr == errUsingInternalEtcd {
+				logrus.Infof("Cluster is using internal etcd. No need to wipe kvdb.")
+			} else {
+				logrus.Warnf("Failed to parse kvdb info. err: %v", kvdbParseErr)
+			}
 		}
 
 	}
@@ -873,6 +874,8 @@ func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, 
 			for i, arg := range c.Args {
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
+				case "-b":
+					return nil, nil, "", errUsingInternalEtcd
 				case "-c":
 					clusterName = c.Args[i+1]
 				case "-k":
