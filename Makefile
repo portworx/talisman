@@ -82,7 +82,7 @@ checkfmt:
 
 lint:
 	@echo "golint"
-	go get -v github.com/golang/lint/golint
+	go get -u golang.org/x/lint/golint
 	for file in $$(find . -name '*.go' | grep -v vendor | \
 																			grep -v '\.pb\.go' | \
 																			grep -v '\.pb\.gw\.go' | \

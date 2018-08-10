@@ -34,11 +34,23 @@ type pxInstallType string
 var errUsingInternalEtcd = fmt.Errorf("cluster is using internal etcd")
 
 const (
-	pxInstallTypeOCI      pxInstallType = "oci"
-	pxInstallTypeDocker   pxInstallType = "docker"
-	pxInstallTypeNone     pxInstallType = "none"
-	changeCauseAnnotation               = "kubernetes.io/change-cause"
-	pxEnableLabelKey                    = "px/enabled"
+	pxInstallTypeOCI       pxInstallType = "oci"
+	pxInstallTypeDocker    pxInstallType = "docker"
+	pxInstallTypeNone      pxInstallType = "none"
+	changeCauseAnnotation                = "kubernetes.io/change-cause"
+	pxEnableLabelKey                     = "px/enabled"
+	dsOptPwxVolumeName                   = "optpwx"
+	dsEtcPwxVolumeName                   = "etcpwx"
+	pksPersistentStoreRoot               = "/var/vcap/store"
+	pxOptPwx                             = "/opt/pwx"
+	pxEtcdPwx                            = "/etc/pwx"
+)
+
+type platformType string
+
+const (
+	platformTypeDefault platformType = "default"
+	platformTypePKS     platformType = "pks"
 )
 
 // SharedAppsScaleDownMode is type for choosing behavior of scaling down shared apps
@@ -217,12 +229,19 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 
 	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v App drain requirement: %v", newOCIMonVer, opts, isAppDrainNeeded)
 
-	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
-	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
+	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
+	_, _, _, platform, configParseErr := ops.parseConfigFromDaemonset()
+	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
+		err := fmt.Errorf("Failed to parse PX config from Daemonset for upgrading PX due to err: %v", configParseErr)
 		return err
 	}
 
-	if err := ops.runDockerPuller(newPXVer); err != nil {
+	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
+	if err := ops.runDockerPuller(newOCIMonVer, platform); err != nil {
+		return err
+	}
+
+	if err := ops.runDockerPuller(newPXVer, platform); err != nil {
 		return err
 	}
 
@@ -261,10 +280,15 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	endpoints, kvdbOpts, clusterName, configParseErr := ops.parseConfigFromDaemonset()
+	endpoints, kvdbOpts, clusterName, platform, configParseErr := ops.parseConfigFromDaemonset()
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for deleting PX due to err: %v", configParseErr)
 		return err
+	}
+
+	pwxHostPathRoot := "/"
+	if platform == platformTypePKS {
+		pwxHostPathRoot = pksPersistentStoreRoot
 	}
 
 	if err := ops.deleteAllPXComponents(clusterName); err != nil {
@@ -276,7 +300,7 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
 		// Wipe px from each node
-		err := ops.runPXNodeWiper()
+		err := ops.runPXNodeWiper(pwxHostPathRoot)
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		}
@@ -296,11 +320,15 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 }
 
 // runDockerPuller runs the DaemonSet to start pulling the given image on all nodes
-func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
+func (ops *pxClusterOps) runDockerPuller(imageToPull string, platform platformType) error {
 	stripSpecialRegex, _ := regexp.Compile("[^a-zA-Z0-9]+")
 	trueVar := true
 
 	pullerName := fmt.Sprintf("docker-puller-%s", stripSpecialRegex.ReplaceAllString(imageToPull, ""))
+	hostVarRunDockerPath := "/var/run/"
+	if platform == platformTypePKS {
+		hostVarRunDockerPath = "/var/vcap/sys/run/docker"
+	}
 
 	labels := map[string]string{
 		"name": pullerName,
@@ -404,7 +432,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 							Name: "varrun",
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/var/run/",
+									Path: hostVarRunDockerPath,
 								},
 							},
 						},
@@ -849,22 +877,33 @@ func (ops *pxClusterOps) wipePXKvdb(endpoints []string, opts map[string]string, 
 	return kvdbInst.DeleteTree(clusterName)
 }
 
-func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string, string, error) {
+func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string, string, platformType, error) {
 	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", platformTypeDefault, err
 	}
 
 	if len(dss) == 0 {
-		return nil, nil, "", fmt.Errorf("Portworx daemonset not found on the cluster. Ensure you have " +
+		return nil, nil, "", platformTypeDefault, fmt.Errorf("Portworx daemonset not found on the cluster. Ensure you have " +
 			"Portworx specs applied in the cluster before issuing this operation.")
 	}
 
+	platform := platformTypeDefault
 	ds := dss[0]
 	var clusterName string
 	var usingInternalEtcd bool
 	endpoints := make([]string, 0)
 	opts := make(map[string]string)
+
+	for _, volume := range ds.Spec.Template.Spec.Volumes {
+		if volume.HostPath != nil && volume.Name == dsOptPwxVolumeName {
+			if strings.HasPrefix(volume.HostPath.Path, pksPersistentStoreRoot) {
+				logrus.Infof("Detected %s install.", platformTypePKS)
+				platform = platformTypePKS
+				break
+			}
+		}
+	}
 
 	for _, c := range ds.Spec.Template.Spec.Containers {
 		if isPXOCIImage(c.Image) || isPXEnterpriseImage(c.Image) {
@@ -878,12 +917,12 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 				case "-k":
 					endpoints, err = splitCSV(c.Args[i+1])
 					if err != nil {
-						return nil, nil, clusterName, err
+						return nil, nil, clusterName, platform, err
 					}
 				case "-pwd":
 					parts := strings.Split(c.Args[i+1], ":")
 					if len(parts) != 0 {
-						return nil, nil, clusterName, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
+						return nil, nil, clusterName, platform, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
 					}
 					opts[kvdb.UsernameKey] = parts[0]
 					opts[kvdb.PasswordKey] = parts[1]
@@ -905,20 +944,20 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 	}
 
 	if usingInternalEtcd {
-		return endpoints, opts, clusterName, errUsingInternalEtcd
+		return endpoints, opts, clusterName, platform, errUsingInternalEtcd
 	}
 
 	if len(endpoints) == 0 {
-		return nil, opts, clusterName, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
+		return nil, opts, clusterName, platform, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
 	if len(clusterName) == 0 {
-		return endpoints, opts, "", fmt.Errorf("failed to get cluster name from daemonset containers: %v",
+		return endpoints, opts, "", platform, fmt.Errorf("failed to get cluster name from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
-	return endpoints, opts, clusterName, nil
+	return endpoints, opts, clusterName, platform, nil
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
@@ -1050,7 +1089,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	return nil
 }
 
-func (ops *pxClusterOps) runPXNodeWiper() error {
+func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot string) error {
 	trueVar := true
 	labels := map[string]string{
 		"name": pxNodeWiperDaemonSetName,
@@ -1090,16 +1129,16 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
-									Name:      "etcpwx",
-									MountPath: "/etc/pwx",
+									Name:      dsEtcPwxVolumeName,
+									MountPath: pxEtcdPwx,
 								},
 								{
 									Name:      "hostproc",
 									MountPath: "/hostproc",
 								},
 								{
-									Name:      "optpwx",
-									MountPath: "/opt/pwx",
+									Name:      dsOptPwxVolumeName,
+									MountPath: pxOptPwx,
 								},
 							},
 						},
@@ -1108,10 +1147,10 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 					ServiceAccountName: talismanServiceAccount,
 					Volumes: []corev1.Volume{
 						{
-							Name: "etcpwx",
+							Name: dsEtcPwxVolumeName,
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/etc/pwx",
+									Path: pwxHostPathRoot + pxEtcdPwx,
 								},
 							},
 						},
@@ -1124,10 +1163,10 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 							},
 						},
 						{
-							Name: "optpwx",
+							Name: dsOptPwxVolumeName,
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/opt/pwx",
+									Path: pwxHostPathRoot + pxOptPwx,
 								},
 							},
 						},

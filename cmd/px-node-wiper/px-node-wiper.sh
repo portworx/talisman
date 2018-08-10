@@ -3,6 +3,7 @@
 WAIT=0 # 0 means don't wait. Run to completion.
 STATUS_FILE=/tmp/px-node-wipe-done
 ETCPWX=/etc/pwx
+OPTPWX=/opt/pwx
 HOSTPROC1_NS=/hostproc/1/ns
 PXCTL=/opt/pwx/bin/pxctl
 
@@ -84,7 +85,7 @@ run_with_nsenter "rm -rf /etc/systemd/system/portworx.service" false
 run_with_nsenter "rm -rf /etc/systemd/system/portworx-reboot.service" false
 
 # unmount oci
-run_with_nsenter "umount /opt/pwx/oci" true
+run_with_nsenter "umount $OPTPWX/oci" true
 
 # pxctl node wipe
 if [ -f "$PXCTL" ]; then
@@ -97,7 +98,7 @@ else
 fi
 
 # Remove binary files
-run_with_nsenter "rm -fr /opt/pwx" false
+run_with_nsenter "rm -fr $OPTPWX" false
 
 # Remove configuration files
 chattr -i /etc/pwx/.private.json || true
