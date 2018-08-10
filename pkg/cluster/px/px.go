@@ -1137,6 +1137,8 @@ func (ops *pxClusterOps) runPXNodeWiper() error {
 	return ops.runDaemonSet(ds, pxNodeWiperTimeout)
 }
 
+// runDaemonSet runs the given daemonset, attempts to validate if it ran successfully and then
+// deletes it
 func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Duration) error {
 	err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
 	if err != nil && !errors.IsNotFound(err) {
@@ -1163,18 +1165,20 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 
 	logrus.Infof("Started daemonSet: [%s] %s", ds.Namespace, ds.Name)
 
+	// Delete the daemonset regardless of status
+	defer func(ds *apps_api.DaemonSet) {
+		err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		if err != nil && !errors.IsNotFound(err) {
+			logrus.Warnf("error while deleting daemonset: %v", err)
+		}
+	}(ds)
+
 	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
 	if err != nil {
 		return err
 	}
 
 	logrus.Infof("Validated successful run of daemonset: [%s] %s", ds.Namespace, ds.Name)
-
-	err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
-	if err != nil {
-		logrus.Errorf("error while deleting daemonset: %v", err)
-		return err
-	}
 
 	return nil
 }
