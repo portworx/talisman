@@ -110,7 +110,7 @@ type pxClusterOps struct {
 // timeouts and intervals
 const (
 	defaultRetryInterval          = 10 * time.Second
-	pxNodeWiperTimeout            = 4 * time.Minute
+	pxNodeWiperTimeout            = 10 * time.Minute
 	sharedVolDetachTimeout        = 5 * time.Minute
 	daemonsetUpdateTriggerTimeout = 5 * time.Minute
 	daemonsetDeleteTimeout        = 5 * time.Minute
