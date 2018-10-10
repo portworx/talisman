@@ -1,4 +1,4 @@
-FROM portworx/px-enterprise:1.3.0-rc5
+FROM portworx/px-enterprise:1.5.1
 
 WORKDIR /
 
