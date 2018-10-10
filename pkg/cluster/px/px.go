@@ -64,7 +64,7 @@ const (
 	pxSecretsNamespace              = "portworx"
 	defaultPXImage                  = "portworx/px-enterprise"
 	dockerPullerImage               = "portworx/docker-puller:latest"
-	pxNodeWiperImage                = "portworx/px-node-wiper:latest"
+	pxNodeWiperImage                = "portworx/px-node-wiper:1.5.1"
 	pxdRestPort                     = 9001
 	pxServiceName                   = "portworx-service"
 	pxClusterRoleName               = "node-get-put-list-role"
@@ -103,8 +103,6 @@ type pxClusterOps struct {
 	k8sOps               k8s.Ops
 	utils                *k8sutils.Instance
 	dockerRegistrySecret string
-	clusterManager       cluster.Cluster
-	volDriver            volume.VolumeDriver
 }
 
 // timeouts and intervals
@@ -146,26 +144,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 		return nil, err
 	}
 
-	k8sOps := k8s.Instance()
-
-	svc, err := k8sOps.GetService(pxServiceName, pxDefaultNamespace)
-	if err != nil {
-		return nil, err
-	}
-
-	ip := svc.Spec.ClusterIP
-	if len(ip) == 0 {
-		return nil, fmt.Errorf("PX service doesn't have a clusterIP assigned")
-	}
-
-	volDriver, clusterManager, err := getPXDriver(ip)
-	if err != nil {
-		return nil, err
-	}
-
 	return &pxClusterOps{
-		volDriver:            volDriver,
-		clusterManager:       clusterManager,
 		k8sOps:               k8s.Instance(),
 		dockerRegistrySecret: dockerRegistrySecret,
 		utils:                utils,
@@ -187,6 +166,21 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
 
+	svc, err := ops.k8sOps.GetService(pxServiceName, pxDefaultNamespace)
+	if err != nil {
+		return err
+	}
+
+	ip := svc.Spec.ClusterIP
+	if len(ip) == 0 {
+		return fmt.Errorf("Portworx service doesn't have a ClusterIP assigned")
+	}
+
+	volDriver, clusterManager, err := getPXDriver(ip)
+	if err != nil {
+		return err
+	}
+
 	if err := ops.preFlightChecks(newSpec); err != nil {
 		return err
 	}
@@ -202,7 +196,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 	newOCIMonVer := fmt.Sprintf("%s:%s", newSpec.Spec.OCIMonImage, newSpec.Spec.OCIMonTag)
 	newPXVer := fmt.Sprintf("%s:%s", newSpec.Spec.PXImage, newSpec.Spec.PXTag)
 
-	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec)
+	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec, clusterManager)
 	if err != nil {
 		return err
 	}
@@ -245,7 +239,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 		}
 
 		// Wait till all px shared volumes are detached
-		err = ops.waitTillPXSharedVolumesDetached()
+		err = ops.waitTillPXSharedVolumesDetached(volDriver)
 		if err != nil {
 			return err
 		}
@@ -265,7 +259,11 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	endpoints, kvdbOpts, clusterName, kvdbParseErr := ops.parseKvdbFromDaemonset()
+	endpoints, kvdbOpts, clusterName, configParseErr := ops.parseConfigFromDaemonset()
+	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
+		err := fmt.Errorf("Failed to parse PX config from Daemonset for deleting PX due to err: %v", configParseErr)
+		return err
+	}
 
 	if err := ops.deleteAllPXComponents(clusterName); err != nil {
 		return err // this error is unexpected and should not be ignored
@@ -281,20 +279,15 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		}
 
-		if kvdbParseErr == nil {
+		if configParseErr == errUsingInternalEtcd {
+			logrus.Infof("Cluster is using internal etcd. No need to wipe kvdb.")
+		} else {
 			// Cleanup PX kvdb tree
 			err = ops.wipePXKvdb(endpoints, kvdbOpts, clusterName)
 			if err != nil {
 				logrus.Warnf("Failed to wipe Portworx KVDB tree. err: %v", err)
 			}
-		} else {
-			if kvdbParseErr == errUsingInternalEtcd {
-				logrus.Infof("Cluster is using internal etcd. No need to wipe kvdb.")
-			} else {
-				logrus.Warnf("Failed to parse kvdb info. err: %v", kvdbParseErr)
-			}
 		}
-
 	}
 
 	return nil
@@ -433,7 +426,7 @@ func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 }
 
 // waitTillPXSharedVolumesDetached waits till all shared volumes are detached
-func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
+func (ops *pxClusterOps) waitTillPXSharedVolumesDetached(volDriver volume.VolumeDriver) error {
 	scs, err := ops.utils.GetPXSharedSCs()
 	if err != nil {
 		return err
@@ -460,7 +453,7 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached() error {
 
 	t := func() (interface{}, bool, error) {
 
-		vols, err := ops.volDriver.Inspect(volsToInspect)
+		vols, err := volDriver.Inspect(volsToInspect)
 		if err != nil {
 			return nil, true, err
 		}
@@ -740,8 +733,8 @@ func (ops *pxClusterOps) createOrUpdateRoleBinding(binding *rbacv1.RoleBinding) 
 }
 
 // isAnyNodeRunningVersionWithPrefix checks if any node in the cluster has a PX version with given prefix
-func (ops *pxClusterOps) isAnyNodeRunningVersionWithPrefix(versionPrefix string) (bool, error) {
-	cluster, err := ops.clusterManager.Enumerate()
+func (ops *pxClusterOps) isAnyNodeRunningVersionWithPrefix(versionPrefix string, clusterManager cluster.Cluster) (bool, error) {
+	cluster, err := clusterManager.Enumerate()
 	if err != nil {
 		return false, err
 	}
@@ -771,8 +764,8 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 }
 
 // isUpgradeAppDrainRequired checks if target is 1.3.3/1.3.4 or upgrade is from 1.2 to 1.3/1.4
-func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster) (bool, error) {
-	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2")
+func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster, clusterManager cluster.Cluster) (bool, error) {
+	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2", clusterManager)
 	if err != nil {
 		return false, err
 	}
@@ -854,14 +847,15 @@ func (ops *pxClusterOps) wipePXKvdb(endpoints []string, opts map[string]string, 
 	return kvdbInst.DeleteTree(clusterName)
 }
 
-func (ops *pxClusterOps) parseKvdbFromDaemonset() ([]string, map[string]string, string, error) {
+func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string, string, error) {
 	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
 	if len(dss) == 0 {
-		return nil, nil, "", fmt.Errorf("no Portworx daemonset found on the cluster")
+		return nil, nil, "", fmt.Errorf("Portworx daemonset not found on the cluster. Ensure you have " +
+			"Portworx specs applied in the cluster before issuing this operation.")
 	}
 
 	ds := dss[0]

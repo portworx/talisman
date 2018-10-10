@@ -106,7 +106,7 @@ func doDelete() {
 
 	err = inst.Delete(nil, opts)
 	if err != nil {
-		logrus.Fatalf("ailed to delete PX cluster. err: %v", err)
+		logrus.Fatalf("Failed to delete PX cluster. err: %v", err)
 	}
 }
 
