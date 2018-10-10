@@ -78,6 +78,8 @@ const (
 	lhConfigMap                     = "px-lighthouse-config"
 	lhServiceName                   = "px-lighthouse"
 	lhDeploymentName                = "px-lighthouse"
+	internalEtcdConfigMapPrefix     = "px-bootstrap-"
+	cloudDriveConfigMapPrefix       = "px-cloud-drive-"
 	pvcControllerClusterRole        = "portworx-pvc-controller-role"
 	pvcControllerClusterRoleBinding = "portworx-pvc-controller-role-binding"
 	pvcControllerServiceAccount     = "portworx-pvc-controller-account"
@@ -860,6 +862,7 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 
 	ds := dss[0]
 	var clusterName string
+	var usingInternalEtcd bool
 	endpoints := make([]string, 0)
 	opts := make(map[string]string)
 
@@ -869,18 +872,18 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
 				case "-b":
-					return nil, nil, "", errUsingInternalEtcd
+					usingInternalEtcd = true
 				case "-c":
 					clusterName = c.Args[i+1]
 				case "-k":
 					endpoints, err = splitCSV(c.Args[i+1])
 					if err != nil {
-						return nil, nil, "", err
+						return nil, nil, clusterName, err
 					}
 				case "-pwd":
 					parts := strings.Split(c.Args[i+1], ":")
 					if len(parts) != 0 {
-						return nil, nil, "", fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
+						return nil, nil, clusterName, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
 					}
 					opts[kvdb.UsernameKey] = parts[0]
 					opts[kvdb.PasswordKey] = parts[1]
@@ -901,13 +904,17 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 		}
 	}
 
+	if usingInternalEtcd {
+		return endpoints, opts, clusterName, errUsingInternalEtcd
+	}
+
 	if len(endpoints) == 0 {
-		return nil, nil, "", fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
+		return nil, opts, clusterName, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
 	if len(clusterName) == 0 {
-		return nil, nil, "", fmt.Errorf("failed to get cluster name from daemonset containers: %v",
+		return endpoints, opts, "", fmt.Errorf("failed to get cluster name from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
@@ -1022,9 +1029,11 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	configMaps := [2]string{
+	configMaps := [4]string{
 		lhConfigMap,
 		storkControllerConfigMap,
+		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, clusterName),
+		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, clusterName),
 	}
 	for _, cm := range configMaps {
 		err = ops.k8sOps.DeleteConfigMap(cm, pxDefaultNamespace)
