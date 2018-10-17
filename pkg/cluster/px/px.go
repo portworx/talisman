@@ -49,7 +49,7 @@ const (
 type platformType string
 
 const (
-	platformTypeDefault platformType = "default"
+	platformTypeDefault platformType = ""
 	platformTypePKS     platformType = "pks"
 )
 
@@ -117,6 +117,7 @@ type pxClusterOps struct {
 	k8sOps               k8s.Ops
 	utils                *k8sutils.Instance
 	dockerRegistrySecret string
+	platform             platformType
 }
 
 // timeouts and intervals
@@ -230,18 +231,19 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v App drain requirement: %v", newOCIMonVer, opts, isAppDrainNeeded)
 
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	_, _, _, platform, configParseErr := ops.parseConfigFromDaemonset()
+	var configParseErr error
+	_, _, _, ops.platform, configParseErr = ops.parseConfigFromDaemonset()
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for upgrading PX due to err: %v", configParseErr)
 		return err
 	}
 
 	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
-	if err := ops.runDockerPuller(newOCIMonVer, platform); err != nil {
+	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
 		return err
 	}
 
-	if err := ops.runDockerPuller(newPXVer, platform); err != nil {
+	if err := ops.runDockerPuller(newPXVer); err != nil {
 		return err
 	}
 
@@ -280,14 +282,20 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	endpoints, kvdbOpts, clusterName, platform, configParseErr := ops.parseConfigFromDaemonset()
+	var (
+		endpoints      []string
+		kvdbOpts       map[string]string
+		clusterName    string
+		configParseErr error
+	)
+	endpoints, kvdbOpts, clusterName, ops.platform, configParseErr = ops.parseConfigFromDaemonset()
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for deleting PX due to err: %v", configParseErr)
 		return err
 	}
 
 	pwxHostPathRoot := "/"
-	if platform == platformTypePKS {
+	if ops.platform == platformTypePKS {
 		pwxHostPathRoot = pksPersistentStoreRoot
 	}
 
@@ -320,13 +328,13 @@ func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) err
 }
 
 // runDockerPuller runs the DaemonSet to start pulling the given image on all nodes
-func (ops *pxClusterOps) runDockerPuller(imageToPull string, platform platformType) error {
+func (ops *pxClusterOps) runDockerPuller(imageToPull string) error {
 	stripSpecialRegex, _ := regexp.Compile("[^a-zA-Z0-9]+")
 	trueVar := true
 
 	pullerName := fmt.Sprintf("docker-puller-%s", stripSpecialRegex.ReplaceAllString(imageToPull, ""))
 	hostVarRunDockerPath := "/var/run/"
-	if platform == platformTypePKS {
+	if ops.platform == platformTypePKS {
 		hostVarRunDockerPath = "/var/vcap/sys/run/docker"
 	}
 
