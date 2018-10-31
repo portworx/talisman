@@ -25,6 +25,9 @@ var (
 	// CloudBackupNotSupported implements cloudBackupDriver by returning
 	// Not supported error
 	CloudBackupNotSupported = &cloudBackupNotSupported{}
+	// CloudMigrateNotSupported implements cloudMigrateDriver by returning
+	// Not supported error
+	CloudMigrateNotSupported = &cloudMigrateNotSupported{}
 )
 
 type blockNotSupported struct{}
@@ -39,12 +42,16 @@ func (b *blockNotSupported) Detach(volumeID string, options map[string]string) e
 
 type snapshotNotSupported struct{}
 
-func (s *snapshotNotSupported) Snapshot(volumeID string, readonly bool, locator *api.VolumeLocator) (string, error) {
+func (s *snapshotNotSupported) Snapshot(volumeID string, readonly bool, locator *api.VolumeLocator, noRetry bool) (string, error) {
 	return "", ErrNotSupported
 }
 
 func (s *snapshotNotSupported) Restore(volumeID, snapshotID string) error {
 	return ErrNotSupported
+}
+
+func (s *snapshotNotSupported) SnapshotGroup(groupID string, labels map[string]string) (*api.GroupSnapCreateResponse, error) {
+	return nil, ErrNotSupported
 }
 
 type ioNotSupported struct{}
@@ -124,6 +131,12 @@ type cloudBackupNotSupported struct{}
 
 func (cl *cloudBackupNotSupported) CloudBackupCreate(
 	input *api.CloudBackupCreateRequest,
+) (*api.CloudBackupCreateResponse, error) {
+	return nil, ErrNotSupported
+}
+
+func (cl *cloudBackupNotSupported) CloudBackupGroupCreate(
+	input *api.CloudBackupGroupCreateRequest,
 ) error {
 	return ErrNotSupported
 }
@@ -182,6 +195,12 @@ func (cl *cloudBackupNotSupported) CloudBackupSchedCreate(
 	return nil, ErrNotSupported
 }
 
+func (cl *cloudBackupNotSupported) CloudBackupGroupSchedCreate(
+	input *api.CloudBackupGroupSchedCreateRequest,
+) (*api.CloudBackupSchedCreateResponse, error) {
+	return nil, ErrNotSupported
+}
+
 func (cl *cloudBackupNotSupported) CloudBackupSchedDelete(
 	input *api.CloudBackupSchedDeleteRequest,
 ) error {
@@ -189,5 +208,18 @@ func (cl *cloudBackupNotSupported) CloudBackupSchedDelete(
 }
 
 func (cl *cloudBackupNotSupported) CloudBackupSchedEnumerate() (*api.CloudBackupSchedEnumerateResponse, error) {
+	return nil, ErrNotSupported
+}
+
+type cloudMigrateNotSupported struct{}
+
+func (cl *cloudMigrateNotSupported) CloudMigrateStart(request *api.CloudMigrateStartRequest) (*api.CloudMigrateStartResponse, error) {
+	return nil, ErrNotSupported
+}
+
+func (cl *cloudMigrateNotSupported) CloudMigrateCancel(request *api.CloudMigrateCancelRequest) error {
+	return ErrNotSupported
+}
+func (cl *cloudMigrateNotSupported) CloudMigrateStatus() (*api.CloudMigrateStatusResponse, error) {
 	return nil, ErrNotSupported
 }

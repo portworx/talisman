@@ -10,20 +10,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
-	"golang.org/x/net/context"
-
 	e "github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	"github.com/coreos/etcd/mvcc/mvccpb"
-
 	"github.com/portworx/kvdb"
 	"github.com/portworx/kvdb/common"
 	ec "github.com/portworx/kvdb/etcd/common"
 	"github.com/portworx/kvdb/mem"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -46,6 +45,8 @@ const (
 
 var (
 	defaultMachines = []string{"http://127.0.0.1:2379"}
+	// mLock is a lock over the maintenanceClient
+	mLock sync.Mutex
 )
 
 // watchQ to collect updates without blocking
@@ -139,18 +140,29 @@ func New(
 		// The time required for a request to fail - 30 sec
 		//HeaderTimeoutPerRequest: time.Duration(10) * time.Second,
 	}
-	c, err := e.New(cfg)
+	kvClient, err := e.New(cfg)
 	if err != nil {
 		return nil, err
 	}
+	// Creating a separate client for maintenance APIs. Currently the maintenance client
+	// is only used for the Status API, to fetch the endpoint status. However if the Status
+	// API errors out for an endpoint, the etcd client code marks the pinned address as not reachable
+	// instead of the actual endpoint for which the Status command failed. This causes the etcd
+	// balancer to go into a retry loop trying to fix its healthy endpoints.
+	// https://github.com/etcd-io/etcd/blob/v3.3.1/clientv3/retry.go#L102
+	mClient, err := e.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	if domain != "" && !strings.HasSuffix(domain, "/") {
 		domain = domain + "/"
 	}
 	return &etcdKV{
 		common.BaseKvdb{FatalCb: fatalErrorCb},
-		c,
-		e.NewAuth(c),
-		e.NewMaintenance(c),
+		kvClient,
+		e.NewAuth(kvClient),
+		e.NewMaintenance(mClient),
 		domain,
 		etcdCommon,
 	}, nil
@@ -190,22 +202,11 @@ func (et *etcdKV) Get(key string) (*kvdb.KVPair, error) {
 			return kvs[0], nil
 		}
 
-		switch err {
-		case context.DeadlineExceeded:
-			logrus.Errorf("[get %v]: kvdb deadline exceeded error: %v, retry count: %v\n", key, err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrTimeout:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrUnhealthy:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		default:
-			if err == rpctypes.ErrGRPCEmptyKey {
-				return nil, kvdb.ErrNotFound
-			}
-			return nil, err
+		retry, err := isRetryNeeded(err, "get", key, i)
+		if retry {
+			continue
 		}
+		return nil, err
 	}
 	return nil, err
 }
@@ -244,9 +245,7 @@ func (et *etcdKV) Create(
 		if ttl < 5 {
 			return nil, kvdb.ErrTTLNotSupported
 		}
-		leaseCtx, leaseCancel := et.Context()
-		leaseResult, err := et.kvClient.Grant(leaseCtx, int64(ttl))
-		leaseCancel()
+		leaseResult, err := et.getLeaseWithRetries(key, int64(ttl))
 		if err != nil {
 			return nil, err
 		}
@@ -290,9 +289,7 @@ func (et *etcdKV) Update(
 		if ttl < 5 {
 			return nil, kvdb.ErrTTLNotSupported
 		}
-		leaseCtx, leaseCancel := et.Context()
-		leaseResult, err := et.kvClient.Grant(leaseCtx, int64(ttl))
-		leaseCancel()
+		leaseResult, err := et.getLeaseWithRetries(key, int64(ttl))
 		if err != nil {
 			return nil, err
 		}
@@ -343,22 +340,11 @@ func (et *etcdKV) Enumerate(prefix string) (kvdb.KVPairs, error) {
 			return kvs, nil
 		}
 
-		switch err {
-		case context.DeadlineExceeded:
-			logrus.Errorf("[enumerate %v]: kvdb deadline exceeded error: %v, retry count: %v\n", prefix, err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrTimeout:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrUnhealthy:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		default:
-			if err == rpctypes.ErrGRPCEmptyKey {
-				return nil, kvdb.ErrNotFound
-			}
-			return nil, err
+		retry, err := isRetryNeeded(err, "enumerate", prefix, i)
+		if retry {
+			continue
 		}
+		return nil, err
 	}
 	return nil, err
 }
@@ -380,8 +366,11 @@ func (et *etcdKV) Delete(key string) (*kvdb.KVPair, error) {
 	)
 	cancel()
 	if err == nil {
-		if result.Deleted != 1 {
-			return nil, fmt.Errorf("Incorrect number of keys: %v deleted", key)
+		if result.Deleted == 0 {
+			return nil, kvdb.ErrNotFound
+		} else if result.Deleted > 1 {
+			return nil, fmt.Errorf("Incorrect number of keys: %v deleted, result: %v",
+				key, result)
 		}
 		kvp.Action = kvdb.KVDelete
 		return kvp, nil
@@ -396,6 +385,9 @@ func (et *etcdKV) Delete(key string) (*kvdb.KVPair, error) {
 
 func (et *etcdKV) DeleteTree(prefix string) error {
 	prefix = et.domain + prefix
+	if !strings.HasSuffix(prefix, kvdb.DefaultSeparator) {
+		prefix += kvdb.DefaultSeparator
+	}
 
 	ctx, cancel := et.Context()
 	_, err := et.kvClient.Delete(
@@ -456,22 +448,14 @@ func (et *etcdKV) Keys(prefix, sep string) ([]string, error) {
 			}
 
 			cancel()
-			switch err {
-			case context.DeadlineExceeded:
-				logrus.Errorf("[%v.%v]: kvdb deadline exceeded error: %v, retry count: %v\n", prefix, sep, err, i)
-				time.Sleep(ec.DefaultIntervalBetweenRetries)
-			case etcdserver.ErrTimeout:
-				logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-				time.Sleep(ec.DefaultIntervalBetweenRetries)
-			case etcdserver.ErrUnhealthy:
-				logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-				time.Sleep(ec.DefaultIntervalBetweenRetries)
-			default:
-				if err == rpctypes.ErrGRPCEmptyKey {
-					break
-				}
-				return nil, err
+			retry, err := isRetryNeeded(err, "keys", prefix, i)
+			if retry {
+				continue
 			}
+			if err == kvdb.ErrNotFound {
+				break
+			}
+			return nil, err
 		}
 		return retList, nil
 	}
@@ -492,9 +476,7 @@ func (et *etcdKV) CompareAndSet(
 
 	opts := []e.OpOption{}
 	if (flags & kvdb.KVTTL) != 0 {
-		leaseCtx, leaseCancel := et.Context()
-		leaseResult, err = et.kvClient.Grant(leaseCtx, int64(kvp.TTL))
-		leaseCancel()
+		leaseResult, err = et.getLeaseWithRetries(key, kvp.TTL)
 		if err != nil {
 			return nil, err
 		}
@@ -505,7 +487,7 @@ func (et *etcdKV) CompareAndSet(
 	if (flags & kvdb.KVModifiedIndex) != 0 {
 		cmp = e.Compare(e.ModRevision(key), "=", int64(kvp.ModifiedIndex))
 	}
-retry:
+
 	for i := 0; i < timeoutMaxRetry; i++ {
 		ctx, cancel := et.Context()
 		txnResponse, txnErr = et.kvClient.Txn(ctx).
@@ -515,21 +497,11 @@ retry:
 		cancel()
 		if txnErr != nil {
 			// Check if we need to retry
-			switch txnErr {
-			case context.DeadlineExceeded, etcdserver.ErrTimeout, etcdserver.ErrUnhealthy:
-				logrus.Errorf("[cas %v]: kvdb error: %v, retry count: %v\n", key, txnErr, i)
-				time.Sleep(ec.DefaultIntervalBetweenRetries)
-			default:
-				if err == rpctypes.ErrGRPCEmptyKey {
-					return nil, kvdb.ErrNotFound
-				} else if strings.Contains(txnErr.Error(), rpctypes.ErrGRPCTimeout.Error()) {
-					logrus.Errorf("[cas: %v] kvdb grpc timeout: %v, retry count %v \n", key, txnErr, i)
-					time.Sleep(ec.DefaultIntervalBetweenRetries)
-				} else {
-					// For all other errors return immediately
-					return nil, txnErr
-				}
-			}
+			retry, txnErr := isRetryNeeded(txnErr, "cas", key, i)
+			if !retry {
+				// For all other errors return immediately
+				return nil, txnErr
+			} // retry is needed
 
 			// server timeout
 			kvPair, err := et.Get(kvp.Key)
@@ -541,7 +513,7 @@ retry:
 				if i == (timeoutMaxRetry - 1) {
 					et.FatalCb("Too many server retries for CAS: %v", *kvp)
 				}
-				continue retry
+				continue
 			} else if bytes.Compare(kvp.Value, kvPair.Value) == 0 {
 				return kvPair, nil
 			}
@@ -551,7 +523,7 @@ retry:
 		if txnResponse.Succeeded == false {
 			if len(txnResponse.Responses) == 0 {
 				logrus.Infof("Etcd did not return any transaction responses "+
-					"for key (%v)", kvp.Key)
+					"for key (%v) index (%v)", kvp.Key, kvp.ModifiedIndex)
 			} else {
 				for i, responseOp := range txnResponse.Responses {
 					logrus.Infof("Etcd transaction Response: %v %v", i,
@@ -560,9 +532,9 @@ retry:
 			}
 			if (flags & kvdb.KVModifiedIndex) != 0 {
 				return nil, kvdb.ErrModified
-			} else {
-				return nil, kvdb.ErrValueMismatch
 			}
+
+			return nil, kvdb.ErrValueMismatch
 		}
 		break
 	}
@@ -579,15 +551,40 @@ func (et *etcdKV) CompareAndDelete(
 	flags kvdb.KVFlags,
 ) (*kvdb.KVPair, error) {
 	key := et.domain + kvp.Key
-	ctx, cancel := et.Context()
+
+	cmp := e.Compare(e.Value(key), "=", string(kvp.Value))
 	if (flags & kvdb.KVModifiedIndex) != 0 {
+		cmp = e.Compare(e.ModRevision(key), "=", int64(kvp.ModifiedIndex))
+	}
+	for i := 0; i < timeoutMaxRetry; i++ {
+		ctx, cancel := et.Context()
 		txnResponse, txnErr := et.kvClient.Txn(ctx).
-			If(e.Compare(e.ModRevision(key), "=", int64(kvp.ModifiedIndex))).
+			If(cmp).
 			Then(e.OpDelete(key)).
 			Commit()
 		cancel()
 		if txnErr != nil {
-			return nil, txnErr
+			// Check if we need to retry
+			retry, txnErr := isRetryNeeded(txnErr, "cad", key, i)
+			if txnErr == kvdb.ErrNotFound {
+				return kvp, nil
+			} else if !retry {
+				// For all other errors return immediately
+				return nil, txnErr
+			} // retry is needed
+
+			// server timeout
+			_, err := et.Get(kvp.Key)
+			if err == kvdb.ErrNotFound {
+				// Our command succeeded
+				return kvp, nil
+			} else if err != nil {
+				return nil, txnErr
+			}
+			if i == (timeoutMaxRetry - 1) {
+				et.FatalCb("Too many server retries for CAD: %v", *kvp)
+			}
+			continue
 		}
 		if txnResponse.Succeeded == false {
 			if len(txnResponse.Responses) == 0 {
@@ -597,27 +594,13 @@ func (et *etcdKV) CompareAndDelete(
 					logrus.Infof("Etcd transaction Response: %v %v", i, responseOp.String())
 				}
 			}
-			return nil, kvdb.ErrModified
-		}
-	} else {
-		txnResponse, txnErr := et.kvClient.Txn(ctx).
-			If(e.Compare(e.Value(key), "=", string(kvp.Value))).
-			Then(e.OpDelete(key)).
-			Commit()
-		cancel()
-		if txnErr != nil {
-			return nil, txnErr
-		}
-		if txnResponse.Succeeded == false {
-			if len(txnResponse.Responses) == 0 {
-				logrus.Infof("Etcd did not return any transaction responses for key (%v)", kvp.Key)
-			} else {
-				for i, responseOp := range txnResponse.Responses {
-					logrus.Infof("Etcd transaction Response: %v %v", i, responseOp.String())
-				}
+			if (flags & kvdb.KVModifiedIndex) != 0 {
+				return nil, kvdb.ErrModified
 			}
+
 			return nil, kvdb.ErrValueMismatch
 		}
+		break
 	}
 	return kvp, nil
 }
@@ -814,19 +797,12 @@ func (et *etcdKV) setWithRetry(key, value string, ttl uint64) (*kvdb.KVPair, err
 			goto handle_error
 		}
 	handle_error:
-		switch err {
-		case context.DeadlineExceeded:
-			logrus.Errorf("[set %v]: kvdb deadline exceeded error: %v, retry count: %v\n", key, err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrTimeout:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		case etcdserver.ErrUnhealthy:
-			logrus.Errorf("kvdb error: %v, retry count: %v \n", err, i)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-		default:
-			goto out
+		var retry bool
+		retry, err = isRetryNeeded(err, "set", key, i)
+		if retry {
+			continue
 		}
+		goto out
 	}
 
 out:
@@ -879,8 +855,9 @@ func (et *etcdKV) refreshLock(
 				if err != nil {
 					et.FatalCb(
 						"Error refreshing lock. [Key %v] [Err: %v]"+
-							" [Current Refresh: %v] [Previous Refresh: %v]",
-						keyString, err, currentRefresh, prevRefresh,
+							" [Current Refresh: %v] [Previous Refresh: %v]"+
+							" [Modified Index: %v]",
+						keyString, err, currentRefresh, prevRefresh, kvPair.ModifiedIndex,
 					)
 					l.Err = err
 					l.Unlock()
@@ -951,7 +928,7 @@ func (et *etcdKV) watchStart(
 				logrus.Errorf("Watch on key %v cancelled. Error: %v", key,
 					wresp.Err())
 				watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
-				break
+				return
 			} else {
 				for _, ev := range wresp.Events {
 					var action string
@@ -972,6 +949,8 @@ func (et *etcdKV) watchStart(
 				}
 			}
 		}
+		logrus.Errorf("Watch on key %v closed without a Cancel response.", key)
+		watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
 	}()
 
 	select {
@@ -992,7 +971,7 @@ func (et *etcdKV) watchStart(
 func (et *etcdKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 	// Create a new bootstrap key
 	var updates []*kvdb.KVPair
-	finalPutDone := false
+	watchClosed := false
 	var lowestKvdbIndex, highestKvdbIndex uint64
 	done := make(chan error)
 	mutex := &sync.Mutex{}
@@ -1008,7 +987,7 @@ func (et *etcdKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 		ok := false
 
 		if err != nil {
-			if err == kvdb.ErrWatchStopped && finalPutDone {
+			if err == kvdb.ErrWatchStopped && watchClosed {
 				return nil
 			}
 			logrus.Errorf("Watch returned error: %v", err)
@@ -1035,14 +1014,13 @@ func (et *etcdKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 		m.Lock()
 		defer m.Unlock()
 		updates = append(updates, kvp)
-		if finalPutDone {
-			if kvp.ModifiedIndex >= highestKvdbIndex {
-				// Done applying changes.
-				logrus.Infof("Snapshot complete")
-				watchErr = fmt.Errorf("done")
-				sendErr = nil
-				goto errordone
-			}
+		if highestKvdbIndex > 0 && kvp.ModifiedIndex >= highestKvdbIndex {
+			// Done applying changes.
+			logrus.Infof("Snapshot complete")
+			watchClosed = true
+			watchErr = fmt.Errorf("done")
+			sendErr = nil
+			goto errordone
 		}
 
 		return nil
@@ -1119,10 +1097,10 @@ func (et *etcdKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 		return nil, 0, fmt.Errorf("Failed to create snap bootstrap key %v, "+
 			"err: %v", bootStrapKeyHigh, err)
 	}
-	highestKvdbIndex = kvPair.ModifiedIndex
 
 	mutex.Lock()
-	finalPutDone = true
+	// not sure if we need a lock, but couldnt find any doc which says its ok
+	highestKvdbIndex = kvPair.ModifiedIndex
 	mutex.Unlock()
 
 	// wait until watch finishes
@@ -1324,6 +1302,8 @@ func (et *etcdKV) ListMembers() (map[string]*kvdb.MemberInfo, error) {
 		return nil, err
 	}
 	resp := make(map[string]*kvdb.MemberInfo)
+	mLock.Lock()
+	defer mLock.Unlock()
 	for _, member := range memberListResponse.Members {
 		var (
 			leader     bool
@@ -1393,6 +1373,28 @@ func (et *etcdKV) constructURL(ip string, port string) string {
 	return urlPrefix + ip + ":" + port
 }
 
+func (et *etcdKV) getLeaseWithRetries(key string, ttl int64) (*e.LeaseGrantResponse, error) {
+	var (
+		leaseResult *e.LeaseGrantResponse
+		leaseErr    error
+		retry       bool
+	)
+	for i := 0; i < timeoutMaxRetry; i++ {
+		leaseCtx, leaseCancel := et.Context()
+		leaseResult, leaseErr = et.kvClient.Grant(leaseCtx, ttl)
+		leaseCancel()
+		if leaseErr != nil {
+			retry, leaseErr = isRetryNeeded(leaseErr, "lease", key, i)
+			if !retry {
+				return nil, leaseErr
+			}
+			continue
+		}
+		return leaseResult, nil
+	}
+	return nil, leaseErr
+}
+
 func getContextWithLeaderRequirement() context.Context {
 	return e.WithRequireLeader(context.Background())
 }
@@ -1407,5 +1409,39 @@ func getEtcdPermType(permType kvdb.PermissionType) (e.PermissionType, error) {
 		return e.PermissionType(e.PermReadWrite), nil
 	default:
 		return -1, kvdb.ErrUnknownPermission
+	}
+}
+
+// isRetryNeeded checks if for the given error does a kvdb retry required.
+// It returns the provided error.
+func isRetryNeeded(err error, fn string, key string, retryCount int) (bool, error) {
+	switch err {
+	case context.DeadlineExceeded, etcdserver.ErrTimeout, etcdserver.ErrUnhealthy:
+		logrus.Errorf("[%v %v]: kvdb error: %v, retry count: %v\n", fn, key, err, retryCount)
+		time.Sleep(ec.DefaultIntervalBetweenRetries)
+		return true, err
+	case rpctypes.ErrGRPCEmptyKey:
+		return false, kvdb.ErrNotFound
+	default:
+		if grpcStatusErr, ok := status.FromError(err); ok && grpcStatusErr.Code() == codes.Unavailable {
+			// We have got a grpc error wrapped in grpc.Status with Code Unavailable
+			// From grpc golang docs : google.golang.org/grpc/codes/codes.go
+
+			// Unavailable indicates the service is currently unavailable.
+			// This is a most likely a transient condition and may be corrected
+			// by retrying with a backoff.
+
+			logrus.Errorf("[%v: %v] kvdb grpc error: %v, retry count %v \n", fn, key, err, retryCount)
+			time.Sleep(ec.DefaultIntervalBetweenRetries)
+			return true, err
+		}
+		if strings.Contains(err.Error(), rpctypes.ErrGRPCTimeout.Error()) {
+			logrus.Errorf("[%v: %v] kvdb grpc timeout: %v, retry count %v \n", fn, key, err, retryCount)
+			time.Sleep(ec.DefaultIntervalBetweenRetries)
+			return true, err
+		}
+
+		// For all other errors return immediately
+		return false, err
 	}
 }
