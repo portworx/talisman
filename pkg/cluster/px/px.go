@@ -18,7 +18,7 @@ import (
 	e3 "github.com/portworx/kvdb/etcd/v3"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
-	apiv1alpha1 "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
+	apiv1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
@@ -143,13 +143,13 @@ type DeleteOptions struct {
 // Cluster an interface to manage a storage cluster
 type Cluster interface {
 	// Create creates the given cluster
-	Create(c *apiv1alpha1.Cluster) error
+	Create(c *apiv1beta1.Cluster) error
 	// Status returns the current status of the given cluster
-	Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error)
+	Status(c *apiv1beta1.Cluster) (*apiv1beta1.ClusterStatus, error)
 	// Upgrade upgrades the given cluster
-	Upgrade(c *apiv1alpha1.Cluster, opts *UpgradeOptions) error
+	Upgrade(c *apiv1beta1.Cluster, opts *UpgradeOptions) error
 	// Delete removes all components of the given cluster
-	Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error
+	Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) error
 }
 
 // NewPXClusterProvider creates a new PX cluster
@@ -166,17 +166,17 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	}, nil
 }
 
-func (ops *pxClusterOps) Create(spec *apiv1alpha1.Cluster) error {
+func (ops *pxClusterOps) Create(spec *apiv1beta1.Cluster) error {
 	logrus.Warnf("creating px cluster is not yet implemented")
 	return nil
 }
 
-func (ops *pxClusterOps) Status(c *apiv1alpha1.Cluster) (*apiv1alpha1.ClusterStatus, error) {
+func (ops *pxClusterOps) Status(c *apiv1beta1.Cluster) (*apiv1beta1.ClusterStatus, error) {
 	logrus.Warnf("cluster status is not yet implemented")
 	return nil, nil
 }
 
-func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOptions) error {
+func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptions) error {
 	if newSpec == nil {
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
@@ -279,7 +279,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1alpha1.Cluster, opts *UpgradeOpti
 	return nil
 }
 
-func (ops *pxClusterOps) Delete(c *apiv1alpha1.Cluster, opts *DeleteOptions) error {
+func (ops *pxClusterOps) Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) error {
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
 	var (
@@ -802,7 +802,7 @@ func (ops *pxClusterOps) isScaleDownOfSharedAppsRequired(isMajorVerUpgrade bool,
 }
 
 // isUpgradeAppDrainRequired checks if target is 1.3.3/1.3.4 or upgrade is from 1.2 to 1.3/1.4
-func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster, clusterManager cluster.Cluster) (bool, error) {
+func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1beta1.Cluster, clusterManager cluster.Cluster) (bool, error) {
 	currentVersionDublin, err := ops.isAnyNodeRunningVersionWithPrefix("1.2", clusterManager)
 	if err != nil {
 		return false, err
@@ -823,7 +823,7 @@ func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1alpha1.Cluster, cl
 	return currentVersionDublin && (strings.HasPrefix(newVersion, "1.3") || strings.HasPrefix(newVersion, "1.4")), nil
 }
 
-func (ops *pxClusterOps) preFlightChecks(spec *apiv1alpha1.Cluster) error {
+func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
 	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
 	if err != nil {
 		return err
