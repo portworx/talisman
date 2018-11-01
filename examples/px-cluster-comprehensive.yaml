@@ -1,4 +1,4 @@
-apiVersion: portworx.com/v1alpha1
+apiVersion: portworx.io/v1beta1
 type: Cluster
 metadata:
   name: px-demo

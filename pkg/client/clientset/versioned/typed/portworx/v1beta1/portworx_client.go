@@ -31,7 +31,7 @@ type PortworxV1beta1Interface interface {
 	VolumePlacementStrategiesGetter
 }
 
-// PortworxV1beta1Client is used to interact with features provided by the portworx.com group.
+// PortworxV1beta1Client is used to interact with features provided by the portworx.io group.
 type PortworxV1beta1Client struct {
 	restClient rest.Interface
 }

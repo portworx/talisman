@@ -52,7 +52,7 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=portworx.com, Version=v1beta1
+	// Group=portworx.io, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithResource("clusters"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Portworx().V1beta1().Clusters().Informer()}, nil
 	case v1beta1.SchemeGroupVersion.WithResource("volumeplacementstrategies"):

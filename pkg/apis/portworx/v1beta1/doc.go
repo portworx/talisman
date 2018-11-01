@@ -17,5 +17,5 @@ limitations under the License.
 // +k8s:deepcopy-gen=package,register
 
 // Package v1beta1 is the v1beta1 version of the API.
-// +groupName=portworx.com
+// +groupName=portworx.io
 package v1beta1
