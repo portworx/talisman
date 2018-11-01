@@ -6,14 +6,13 @@ import (
 	"log"
 	"net"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	snap_v1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	snap_client "github.com/kubernetes-incubator/external-storage/snapshot/pkg/client"
-	"github.com/libopenstorage/stork/pkg/apis/stork.com/v1alpha1"
+	"github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	storkclientset "github.com/libopenstorage/stork/pkg/client/clientset/versioned"
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
@@ -22,11 +21,19 @@ import (
 	"k8s.io/api/core/v1"
 	rbac_v1 "k8s.io/api/rbac/v1"
 	storage_api "k8s.io/api/storage/v1"
+	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/kubernetes/typed/apps/v1beta2"
@@ -36,17 +43,11 @@ import (
 )
 
 const (
-	masterLabelKey                = "node-role.kubernetes.io/master"
-	hostnameKey                   = "kubernetes.io/hostname"
-	pvcStorageClassKey            = "volume.beta.kubernetes.io/storage-class"
-	pvcStorageProvisionerKey      = "volume.beta.kubernetes.io/storage-provisioner"
-	labelUpdateMaxRetries         = 5
-	nodeUpdateTimeout             = 1 * time.Minute
-	nodeUpdateRetryInterval       = 2 * time.Second
-	deploymentReadyTimeout        = 10 * time.Minute
-	validateStatefulSetPVCTimeout = 15 * time.Minute
-	validatePVCTimeout            = 5 * time.Minute
-	validatePVCRetryInterval      = 10 * time.Second
+	masterLabelKey           = "node-role.kubernetes.io/master"
+	hostnameKey              = "kubernetes.io/hostname"
+	pvcStorageClassKey       = "volume.beta.kubernetes.io/storage-class"
+	pvcStorageProvisionerKey = "volume.beta.kubernetes.io/storage-provisioner"
+	labelUpdateMaxRetries    = 5
 )
 
 var deleteForegroundPolicy = meta_v1.DeletePropagationForeground
@@ -70,9 +71,15 @@ type Ops interface {
 	StorageClassOps
 	PersistentVolumeClaimOps
 	SnapshotOps
+	RuleOps
 	SecretOps
 	ConfigMapOps
 	EventOps
+	CRDOps
+	ClusterPairOps
+	MigrationOps
+	ObjectOps
+	SetConfig(config *rest.Config)
 }
 
 // EventOps is an interface to put and get k8s events
@@ -116,12 +123,12 @@ type NodeOps interface {
 	// WatchNode sets up a watcher that listens for the changes on Node.
 	WatchNode(node *v1.Node, fn NodeWatchFunc) error
 	// CordonNode cordons the given node
-	CordonNode(nodeName string) error
+	CordonNode(nodeName string, timeout, retryInterval time.Duration) error
 	// UnCordonNode uncordons the given node
-	UnCordonNode(nodeName string) error
+	UnCordonNode(nodeName string, timeout, retryInterval time.Duration) error
 	// DrainPodsFromNode drains given pods from given node. If timeout is set to
 	// a non-zero value, it waits for timeout duration for each pod to get deleted
-	DrainPodsFromNode(nodeName string, pods []v1.Pod, timeout time.Duration) error
+	DrainPodsFromNode(nodeName string, pods []v1.Pod, timeout, retryInterval time.Duration) error
 }
 
 // ServiceOps is an interface to perform k8s service operations
@@ -161,7 +168,7 @@ type StatefulSetOps interface {
 	// GetPVCsForStatefulSet returns all the PVCs for given stateful set
 	GetPVCsForStatefulSet(ss *apps_api.StatefulSet) (*v1.PersistentVolumeClaimList, error)
 	// ValidatePVCsForStatefulSet validates the PVCs for the given stateful set
-	ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet) error
+	ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet, timeout, retryInterval time.Duration) error
 }
 
 // DeploymentOps is an interface to perform k8s deployment operations
@@ -175,7 +182,7 @@ type DeploymentOps interface {
 	// DeleteDeployment deletes the given deployment
 	DeleteDeployment(name, namespace string) error
 	// ValidateDeployment validates the given deployment if it's running and healthy
-	ValidateDeployment(*apps_api.Deployment) error
+	ValidateDeployment(deployment *apps_api.Deployment, timeout, retryInterval time.Duration) error
 	// ValidateTerminatedDeployment validates if given deployment is terminated
 	ValidateTerminatedDeployment(*apps_api.Deployment) error
 	// GetDeploymentPods returns pods for the given deployment
@@ -274,6 +281,8 @@ type PodOps interface {
 	GetPodByName(string, string) (*v1.Pod, error)
 	// GetPodByUID returns pod with the given UID, or error if nothing found
 	GetPodByUID(types.UID, string) (*v1.Pod, error)
+	// DeletePod deletes the given pod
+	DeletePod(string, string, bool) error
 	// DeletePods deletes the given pods
 	DeletePods([]v1.Pod, bool) error
 	// IsPodRunning checks if all containers in a pod are in running state
@@ -286,6 +295,8 @@ type PodOps interface {
 	WaitForPodDeletion(uid types.UID, namespace string, timeout time.Duration) error
 	// RunCommandInPod runs given command in the given pod
 	RunCommandInPod(cmds []string, podName, containerName, namespace string) (string, error)
+	// ValidatePod validates the given pod if it's ready
+	ValidatePod(pod *v1.Pod, timeout, retryInterval time.Duration) error
 }
 
 // StorageClassOps is an interface to perform k8s storage class operations
@@ -310,10 +321,12 @@ type StorageClassOps interface {
 type PersistentVolumeClaimOps interface {
 	// CreatePersistentVolumeClaim creates the given persistent volume claim
 	CreatePersistentVolumeClaim(*v1.PersistentVolumeClaim) (*v1.PersistentVolumeClaim, error)
+	// UpdatePersistentVolumeClaim updates an existing persistent volume claim
+	UpdatePersistentVolumeClaim(*v1.PersistentVolumeClaim) (*v1.PersistentVolumeClaim, error)
 	// DeletePersistentVolumeClaim deletes the given persistent volume claim
 	DeletePersistentVolumeClaim(name, namespace string) error
 	// ValidatePersistentVolumeClaim validates the given pvc
-	ValidatePersistentVolumeClaim(*v1.PersistentVolumeClaim) error
+	ValidatePersistentVolumeClaim(vv *v1.PersistentVolumeClaim, timeout, retryInterval time.Duration) error
 	// GetPersistentVolumeClaim returns the PVC for given name and namespace
 	GetPersistentVolumeClaim(pvcName string, namespace string) (*v1.PersistentVolumeClaim, error)
 	// GetPersistentVolumeClaims returns all PVCs in given namespace and that match the optional labelSelector
@@ -338,12 +351,16 @@ type PersistentVolumeClaimOps interface {
 type SnapshotOps interface {
 	// GetSnapshot returns the snapshot for given name and namespace
 	GetSnapshot(name string, namespace string) (*snap_v1.VolumeSnapshot, error)
+	// ListSnapshots lists all snapshots in the given namespace
+	ListSnapshots(namespace string) (*snap_v1.VolumeSnapshotList, error)
 	// CreateSnapshot creates the given snapshot
 	CreateSnapshot(*snap_v1.VolumeSnapshot) (*snap_v1.VolumeSnapshot, error)
+	// UpdateSnapshot updates the given snapshot
+	UpdateSnapshot(*snap_v1.VolumeSnapshot) (*snap_v1.VolumeSnapshot, error)
 	// DeleteSnapshot deletes the given snapshot
 	DeleteSnapshot(name string, namespace string) error
-	// ValidateSnapshot validates the given snapshot
-	ValidateSnapshot(name string, namespace string) error
+	// ValidateSnapshot validates the given snapshot.
+	ValidateSnapshot(name string, namespace string, retry bool, timeout, retryInterval time.Duration) error
 	// GetVolumeForSnapshot returns the volumeID for the given snapshot
 	GetVolumeForSnapshot(name string, namespace string) (string, error)
 	// GetSnapshotStatus returns the status of the given snapshot
@@ -354,16 +371,18 @@ type SnapshotOps interface {
 	CreateSnapshotData(*snap_v1.VolumeSnapshotData) (*snap_v1.VolumeSnapshotData, error)
 	// DeleteSnapshotData deletes the given snapshot
 	DeleteSnapshotData(name string) error
+	// ValidateSnapshotData validates the given snapshot data object
+	ValidateSnapshotData(name string, retry bool, timeout, retryInterval time.Duration) error
 }
 
-// StorkRuleOps is an interface to perform operations for k8s stork rule
-type StorkRuleOps interface {
-	// GetStorkRule fetches the given stork rule
-	GetStorkRule(name, namespace string) (*v1alpha1.StorkRule, error)
-	// CreateStorkRule creates the given stork rule
-	CreateStorkRule(rule *v1alpha1.StorkRule) (*v1alpha1.StorkRule, error)
-	// DeleteStorkRule deletes the given stork rule
-	DeleteStorkRule(name, namespace string) error
+// RuleOps is an interface to perform operations for k8s stork rule
+type RuleOps interface {
+	// GetRule fetches the given stork rule
+	GetRule(name, namespace string) (*v1alpha1.Rule, error)
+	// CreateRule creates the given stork rule
+	CreateRule(rule *v1alpha1.Rule) (*v1alpha1.Rule, error)
+	// DeleteRule deletes the given stork rule
+	DeleteRule(name, namespace string) error
 }
 
 // SecretOps is an interface to perform k8s Secret operations
@@ -392,16 +411,81 @@ type ConfigMapOps interface {
 	UpdateConfigMap(configMap *v1.ConfigMap) (*v1.ConfigMap, error)
 }
 
+// CRDOps is an interface to perfrom k8s Customer Resource operations
+type CRDOps interface {
+	// CreateCRD creates the given custom resource
+	CreateCRD(resource CustomResource) error
+	// ValidateCRD checks if the given CRD is registered
+	ValidateCRD(resource CustomResource, timeout, retryInterval time.Duration) error
+}
+
+// ClusterPairOps is an interface to perfrom k8s ClusterPair operations
+type ClusterPairOps interface {
+	// CreateClusterPair creates the ClusterPair
+	CreateClusterPair(*v1alpha1.ClusterPair) error
+	// GetClusterPair gets the ClusterPair
+	GetClusterPair(string) (*v1alpha1.ClusterPair, error)
+	// ListClusterPairs gets all the ClusterPairs
+	ListClusterPairs() (*v1alpha1.ClusterPairList, error)
+	// DeleteClusterPair deletes the ClusterPair
+	DeleteClusterPair(string) error
+}
+
+// MigrationOps is an interface to perfrom k8s Migration operations
+type MigrationOps interface {
+	// CreateMigration creates the Migration
+	CreateMigration(*v1alpha1.Migration) error
+	// GetMigration gets the Migration
+	GetMigration(string) (*v1alpha1.Migration, error)
+	// ListMigrations lists all the Migration
+	ListMigrations() (*v1alpha1.MigrationList, error)
+	// UpdateMigration updates the Migration
+	UpdateMigration(*v1alpha1.Migration) (*v1alpha1.Migration, error)
+	// DeleteMigration deletes the Migration
+	DeleteMigration(string) error
+}
+
+// ObjectOps is an interface to perform generic Object operations
+type ObjectOps interface {
+	// GetObject returns the latest object given a generic Object
+	GetObject(object runtime.Object) (runtime.Object, error)
+	// UpdateObject updates a generic Object
+	UpdateObject(object runtime.Object) (runtime.Object, error)
+}
+
+// CustomResource is for creating a Kubernetes TPR/CRD
+type CustomResource struct {
+	// Name of the custom resource
+	Name string
+
+	// Plural of the custom resource in plural
+	Plural string
+
+	// Group the custom resource belongs to
+	Group string
+
+	// Version which should be defined in a const above
+	Version string
+
+	// Scope of the CRD. Namespaced or cluster
+	Scope apiextensionsv1beta1.ResourceScope
+
+	// Kind is the serialized interface of the resource.
+	Kind string
+}
+
 var (
 	instance Ops
 	once     sync.Once
 )
 
 type k8sOps struct {
-	client      *kubernetes.Clientset
-	snapClient  *rest.RESTClient
-	storkClient storkclientset.Interface
-	config      *rest.Config
+	client             *kubernetes.Clientset
+	snapClient         *rest.RESTClient
+	storkClient        storkclientset.Interface
+	apiExtensionClient apiextensionsclient.Interface
+	config             *rest.Config
+	dynamicInterface   dynamic.Interface
 }
 
 // Instance returns a singleton instance of k8sOps type
@@ -412,23 +496,26 @@ func Instance() Ops {
 	return instance
 }
 
+func (k *k8sOps) SetConfig(config *rest.Config) {
+	// Set the config and reset the client
+	k.config = config
+	k.client = nil
+}
+
 // Initialize the k8s client if uninitialized
 func (k *k8sOps) initK8sClient() error {
 	if k.client == nil {
-		k8sClient, snapClient, storkClient, err := k.getK8sClient()
+		err := k.setK8sClient()
 		if err != nil {
 			return err
 		}
 
 		// Quick validation if client connection works
-		_, err = k8sClient.ServerVersion()
+		_, err = k.client.ServerVersion()
 		if err != nil {
 			return fmt.Errorf("failed to connect to k8s server: %s", err)
 		}
 
-		k.client = k8sClient
-		k.snapClient = snapClient
-		k.storkClient = storkClient
 	}
 	return nil
 }
@@ -718,7 +805,7 @@ func (k *k8sOps) WatchNode(node *v1.Node, watchNodeFn NodeWatchFunc) error {
 	return nil
 }
 
-func (k *k8sOps) CordonNode(nodeName string) error {
+func (k *k8sOps) CordonNode(nodeName string, timeout, retryInterval time.Duration) error {
 	t := func() (interface{}, bool, error) {
 		if err := k.initK8sClient(); err != nil {
 			return nil, true, err
@@ -740,14 +827,14 @@ func (k *k8sOps) CordonNode(nodeName string) error {
 
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, nodeUpdateTimeout, nodeUpdateRetryInterval); err != nil {
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (k *k8sOps) UnCordonNode(nodeName string) error {
+func (k *k8sOps) UnCordonNode(nodeName string, timeout, retryInterval time.Duration) error {
 	t := func() (interface{}, bool, error) {
 		if err := k.initK8sClient(); err != nil {
 			return nil, true, err
@@ -769,22 +856,22 @@ func (k *k8sOps) UnCordonNode(nodeName string) error {
 
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, nodeUpdateTimeout, nodeUpdateRetryInterval); err != nil {
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (k *k8sOps) DrainPodsFromNode(nodeName string, pods []v1.Pod, timeout time.Duration) error {
-	err := k.CordonNode(nodeName)
+func (k *k8sOps) DrainPodsFromNode(nodeName string, pods []v1.Pod, timeout time.Duration, retryInterval time.Duration) error {
+	err := k.CordonNode(nodeName, timeout, retryInterval)
 	if err != nil {
 		return err
 	}
 
 	err = k.DeletePods(pods, false)
 	if err != nil {
-		e := k.UnCordonNode(nodeName) // rollback cordon
+		e := k.UnCordonNode(nodeName, timeout, retryInterval) // rollback cordon
 		if e != nil {
 			log.Printf("failed to uncordon node: %s", nodeName)
 		}
@@ -947,7 +1034,7 @@ func (k *k8sOps) ValidateDeletedService(svcName string, svcNS string) error {
 
 	_, err := k.client.CoreV1().Services(svcNS).Get(svcName, meta_v1.GetOptions{})
 	if err != nil {
-		if matched, _ := regexp.MatchString(".+ not found", err.Error()); matched {
+		if errors.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -1006,7 +1093,7 @@ func (k *k8sOps) UpdateDeployment(deployment *apps_api.Deployment) (*apps_api.De
 	return k.appsClient().Deployments(deployment.Namespace).Update(deployment)
 }
 
-func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment) error {
+func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment, timeout, retryInterval time.Duration) error {
 	t := func() (interface{}, bool, error) {
 		dep, err := k.GetDeployment(deployment.Name, deployment.Namespace)
 		if err != nil {
@@ -1014,9 +1101,9 @@ func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment) error {
 		}
 
 		requiredReplicas := *dep.Spec.Replicas
+		shared := false
 
 		if requiredReplicas != 1 {
-			shared := false
 			foundPVC := false
 			for _, vol := range dep.Spec.Template.Spec.Volumes {
 				if vol.PersistentVolumeClaim != nil {
@@ -1055,7 +1142,6 @@ func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment) error {
 				Cause: "Deployment has 0 pods",
 			}
 		}
-
 		podsOverviewString := k.generatePodsOverviewString(pods)
 		if requiredReplicas > dep.Status.AvailableReplicas {
 			return "", true, &ErrAppNotReady{
@@ -1070,6 +1156,14 @@ func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment) error {
 				ID: dep.Name,
 				Cause: fmt.Sprintf("Expected replicas: %v Ready replicas: %v Current pods overview:\n%s",
 					requiredReplicas, dep.Status.ReadyReplicas, podsOverviewString),
+			}
+		}
+
+		if requiredReplicas != dep.Status.UpdatedReplicas && shared {
+			return "", true, &ErrAppNotReady{
+				ID: dep.Name,
+				Cause: fmt.Sprintf("Expected replicas: %v Updated replicas: %v Current pods overview:\n%s",
+					requiredReplicas, dep.Status.UpdatedReplicas, podsOverviewString),
 			}
 		}
 
@@ -1094,7 +1188,7 @@ func (k *k8sOps) ValidateDeployment(deployment *apps_api.Deployment) error {
 		}
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, deploymentReadyTimeout, 10*time.Second); err != nil {
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
 		return err
 	}
 	return nil
@@ -1104,8 +1198,8 @@ func (k *k8sOps) ValidateTerminatedDeployment(deployment *apps_api.Deployment) e
 	t := func() (interface{}, bool, error) {
 		dep, err := k.GetDeployment(deployment.Name, deployment.Namespace)
 		if err != nil {
-			if matched, _ := regexp.MatchString(".+ not found", err.Error()); matched {
-				return "", true, nil
+			if errors.IsNotFound(err) {
+				return "", false, nil
 			}
 			return "", true, err
 		}
@@ -1526,7 +1620,7 @@ func (k *k8sOps) ValidateTerminatedStatefulSet(statefulset *apps_api.StatefulSet
 	t := func() (interface{}, bool, error) {
 		sset, err := k.GetStatefulSet(statefulset.Name, statefulset.Namespace)
 		if err != nil {
-			if matched, _ := regexp.MatchString(".+ not found", err.Error()); matched {
+			if errors.IsNotFound(err) {
 				return "", false, nil
 			}
 
@@ -1598,7 +1692,7 @@ func (k *k8sOps) GetPVCsForStatefulSet(ss *apps_api.StatefulSet) (*v1.Persistent
 	return k.getPVCsWithListOptions(ss.Namespace, listOptions)
 }
 
-func (k *k8sOps) ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet) error {
+func (k *k8sOps) ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet, timeout, retryTimeout time.Duration) error {
 	listOptions, err := k.getListOptionsForStatefulSet(ss)
 	if err != nil {
 		return err
@@ -1615,7 +1709,7 @@ func (k *k8sOps) ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet) error {
 		}
 
 		for _, pvc := range pvcList.Items {
-			if err := k.ValidatePersistentVolumeClaim(&pvc); err != nil {
+			if err := k.ValidatePersistentVolumeClaim(&pvc, timeout, retryTimeout); err != nil {
 				return nil, true, err
 			}
 		}
@@ -1623,7 +1717,7 @@ func (k *k8sOps) ValidatePVCsForStatefulSet(ss *apps_api.StatefulSet) error {
 		return nil, false, nil
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, validateStatefulSetPVCTimeout, validatePVCRetryInterval); err != nil {
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryTimeout); err != nil {
 		return err
 	}
 	return nil
@@ -1765,6 +1859,16 @@ func (k *k8sOps) DeleteServiceAccount(accountName, namespace string) error {
 // Pod APIs - BEGIN
 
 func (k *k8sOps) DeletePods(pods []v1.Pod, force bool) error {
+	for _, pod := range pods {
+		if err := k.DeletePod(pod.Name, pod.Namespace, force); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (k *k8sOps) DeletePod(name string, ns string, force bool) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
 	}
@@ -1775,13 +1879,7 @@ func (k *k8sOps) DeletePods(pods []v1.Pod, force bool) error {
 		deleteOptions.GracePeriodSeconds = &gracePeriodSec
 	}
 
-	for _, pod := range pods {
-		if err := k.client.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &deleteOptions); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return k.client.CoreV1().Pods(ns).Delete(name, &deleteOptions)
 }
 
 func (k *k8sOps) CreatePod(pod *v1.Pod) (*v1.Pod, error) {
@@ -2021,6 +2119,26 @@ func (k *k8sOps) IsPodBeingManaged(pod v1.Pod) bool {
 	return false
 }
 
+func (k *k8sOps) ValidatePod(pod *v1.Pod, timeout, retryInterval time.Duration) error {
+	t := func() (interface{}, bool, error) {
+		currPod, err := k.GetPodByUID(pod.UID, pod.Namespace)
+		if err != nil {
+			return "", true, fmt.Errorf("Could not get Pod [%s] %s", pod.Namespace, pod.Name)
+		}
+
+		ready := k.IsPodReady(*currPod)
+		if !ready {
+			return "", true, fmt.Errorf("Pod %s, ID: %s  is not ready. Status %v", currPod.Name, currPod.UID, currPod.Status.Phase)
+		}
+
+		return "", false, nil
+	}
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Pod APIs - END
 
 // StorageClass APIs - BEGIN
@@ -2089,6 +2207,19 @@ func (k *k8sOps) CreatePersistentVolumeClaim(pvc *v1.PersistentVolumeClaim) (*v1
 	return k.client.CoreV1().PersistentVolumeClaims(ns).Create(pvc)
 }
 
+func (k *k8sOps) UpdatePersistentVolumeClaim(pvc *v1.PersistentVolumeClaim) (*v1.PersistentVolumeClaim, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	ns := pvc.Namespace
+	if len(ns) == 0 {
+		ns = v1.NamespaceDefault
+	}
+
+	return k.client.CoreV1().PersistentVolumeClaims(ns).Update(pvc)
+}
+
 func (k *k8sOps) DeletePersistentVolumeClaim(name, namespace string) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
@@ -2097,7 +2228,7 @@ func (k *k8sOps) DeletePersistentVolumeClaim(name, namespace string) error {
 	return k.client.CoreV1().PersistentVolumeClaims(namespace).Delete(name, &meta_v1.DeleteOptions{})
 }
 
-func (k *k8sOps) ValidatePersistentVolumeClaim(pvc *v1.PersistentVolumeClaim) error {
+func (k *k8sOps) ValidatePersistentVolumeClaim(pvc *v1.PersistentVolumeClaim, timeout, retryInterval time.Duration) error {
 	t := func() (interface{}, bool, error) {
 		if err := k.initK8sClient(); err != nil {
 			return "", true, err
@@ -2120,7 +2251,7 @@ func (k *k8sOps) ValidatePersistentVolumeClaim(pvc *v1.PersistentVolumeClaim) er
 		}
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, validatePVCTimeout, validatePVCRetryInterval); err != nil {
+	if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
 		return err
 	}
 	return nil
@@ -2288,6 +2419,23 @@ func (k *k8sOps) CreateSnapshot(snap *snap_v1.VolumeSnapshot) (*snap_v1.VolumeSn
 	return &result, nil
 }
 
+func (k *k8sOps) UpdateSnapshot(snap *snap_v1.VolumeSnapshot) (*snap_v1.VolumeSnapshot, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	var result snap_v1.VolumeSnapshot
+	if err := k.snapClient.Put().
+		Name(snap.Metadata.Name).
+		Resource(snap_v1.VolumeSnapshotResourcePlural).
+		Namespace(snap.Metadata.Namespace).
+		Body(snap).
+		Do().Into(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (k *k8sOps) DeleteSnapshot(name string, namespace string) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
@@ -2299,7 +2447,7 @@ func (k *k8sOps) DeleteSnapshot(name string, namespace string) error {
 		Do().Error()
 }
 
-func (k *k8sOps) ValidateSnapshot(name string, namespace string) error {
+func (k *k8sOps) ValidateSnapshot(name string, namespace string, retry bool, timeout, retryInterval time.Duration) error {
 	if err := k.initK8sClient(); err != nil {
 		return err
 	}
@@ -2311,7 +2459,7 @@ func (k *k8sOps) ValidateSnapshot(name string, namespace string) error {
 
 		for _, condition := range status.Conditions {
 			if condition.Type == snap_v1.VolumeSnapshotConditionReady && condition.Status == v1.ConditionTrue {
-				return "", true, nil
+				return "", false, nil
 			} else if condition.Type == snap_v1.VolumeSnapshotConditionError && condition.Status == v1.ConditionTrue {
 				return "", true, &ErrSnapshotFailed{
 					ID:    name,
@@ -2326,8 +2474,57 @@ func (k *k8sOps) ValidateSnapshot(name string, namespace string) error {
 		}
 	}
 
-	if _, err := task.DoRetryWithTimeout(t, 5*time.Minute, 10*time.Second); err != nil {
+	if retry {
+		if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
+			return err
+		}
+	} else {
+		if _, _, err := t(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (k *k8sOps) ValidateSnapshotData(name string, retry bool, timeout, retryInterval time.Duration) error {
+	if err := k.initK8sClient(); err != nil {
 		return err
+	}
+
+	t := func() (interface{}, bool, error) {
+		snapData, err := k.GetSnapshotData(name)
+		if err != nil {
+			return "", true, err
+		}
+
+		for _, condition := range snapData.Status.Conditions {
+			if condition.Status == v1.ConditionTrue {
+				if condition.Type == snap_v1.VolumeSnapshotDataConditionReady {
+					return "", false, nil
+				} else if condition.Type == snap_v1.VolumeSnapshotDataConditionError {
+					return "", true, &ErrSnapshotDataFailed{
+						ID:    name,
+						Cause: fmt.Sprintf("SnapshotData Status %v", snapData.Status),
+					}
+				}
+			}
+		}
+
+		return "", true, &ErrSnapshotDataNotReady{
+			ID:    name,
+			Cause: fmt.Sprintf("SnapshotData Status %v", snapData.Status),
+		}
+	}
+
+	if retry {
+		if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
+			return err
+		}
+	} else {
+		if _, _, err := t(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -2350,6 +2547,22 @@ func (k *k8sOps) GetSnapshot(name string, namespace string) (*snap_v1.VolumeSnap
 	var result snap_v1.VolumeSnapshot
 	if err := k.snapClient.Get().
 		Name(name).
+		Resource(snap_v1.VolumeSnapshotResourcePlural).
+		Namespace(namespace).
+		Do().Into(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (k *k8sOps) ListSnapshots(namespace string) (*snap_v1.VolumeSnapshotList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	var result snap_v1.VolumeSnapshotList
+	if err := k.snapClient.Get().
 		Resource(snap_v1.VolumeSnapshotResourcePlural).
 		Namespace(namespace).
 		Do().Into(&result); err != nil {
@@ -2412,34 +2625,34 @@ func (k *k8sOps) DeleteSnapshotData(name string) error {
 
 // Snapshot APIs - END
 
-// StorkRule APIs - BEGIN
-func (k *k8sOps) GetStorkRule(name, namespace string) (*v1alpha1.StorkRule, error) {
+// Rule APIs - BEGIN
+func (k *k8sOps) GetRule(name, namespace string) (*v1alpha1.Rule, error) {
 	if err := k.initK8sClient(); err != nil {
 		return nil, nil
 	}
 
-	return k.storkClient.Stork().StorkRules(namespace).Get(name, meta_v1.GetOptions{})
+	return k.storkClient.Stork().Rules(namespace).Get(name, meta_v1.GetOptions{})
 }
 
-func (k *k8sOps) CreateStorkRule(rule *v1alpha1.StorkRule) (*v1alpha1.StorkRule, error) {
+func (k *k8sOps) CreateRule(rule *v1alpha1.Rule) (*v1alpha1.Rule, error) {
 	if err := k.initK8sClient(); err != nil {
 		return nil, nil
 	}
 
-	return k.storkClient.Stork().StorkRules(rule.GetNamespace()).Create(rule)
+	return k.storkClient.Stork().Rules(rule.GetNamespace()).Create(rule)
 }
 
-func (k *k8sOps) DeleteStorkRule(name, namespace string) error {
+func (k *k8sOps) DeleteRule(name, namespace string) error {
 	if err := k.initK8sClient(); err != nil {
 		return nil
 	}
 
-	return k.storkClient.Stork().StorkRules(namespace).Delete(name, &meta_v1.DeleteOptions{
+	return k.storkClient.Stork().Rules(namespace).Delete(name, &meta_v1.DeleteOptions{
 		PropagationPolicy: &deleteForegroundPolicy,
 	})
 }
 
-// StorkRule APIs - END
+// Rule APIs - END
 
 // Secret APIs - BEGIN
 
@@ -2558,6 +2771,91 @@ func (k *k8sOps) UpdateConfigMap(configMap *v1.ConfigMap) (*v1.ConfigMap, error)
 
 // ConfigMap APIs - END
 
+// ClusterPair APIs - BEGIN
+func (k *k8sOps) GetClusterPair(name string) (*v1alpha1.ClusterPair, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().ClusterPairs().Get(name, meta_v1.GetOptions{})
+}
+
+func (k *k8sOps) ListClusterPairs() (*v1alpha1.ClusterPairList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().ClusterPairs().List(meta_v1.ListOptions{})
+}
+
+func (k *k8sOps) CreateClusterPair(pair *v1alpha1.ClusterPair) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	_, err := k.storkClient.Stork().ClusterPairs().Create(pair)
+	return err
+}
+
+func (k *k8sOps) DeleteClusterPair(name string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.storkClient.Stork().ClusterPairs().Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+// ClusterPair APIs - END
+
+// Migration APIs - BEGIN
+func (k *k8sOps) GetMigration(name string) (*v1alpha1.Migration, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().Migrations().Get(name, meta_v1.GetOptions{})
+}
+
+func (k *k8sOps) ListMigrations() (*v1alpha1.MigrationList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().Migrations().List(meta_v1.ListOptions{})
+}
+
+func (k *k8sOps) CreateMigration(migration *v1alpha1.Migration) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	_, err := k.storkClient.Stork().Migrations().Create(migration)
+	return err
+}
+
+func (k *k8sOps) DeleteMigration(name string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.storkClient.Stork().Migrations().Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) UpdateMigration(migration *v1alpha1.Migration) (*v1alpha1.Migration, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().Migrations().Update(migration)
+}
+
+// Migration APIs - END
+
+// Event APIs - BEGIN
 // CreateEvent puts an event into k8s etcd
 func (k *k8sOps) CreateEvent(event *v1.Event) (*v1.Event, error) {
 	if err := k.initK8sClient(); err != nil {
@@ -2574,76 +2872,182 @@ func (k *k8sOps) ListEvents(namespace string, opts meta_v1.ListOptions) (*v1.Eve
 	return k.client.CoreV1().Events(namespace).List(opts)
 }
 
+// Event APIs - END
+
+// CRD APIs - BEGIN
+func (k *k8sOps) CreateCRD(resource CustomResource) error {
+	crdName := fmt.Sprintf("%s.%s", resource.Plural, resource.Group)
+	crd := &apiextensionsv1beta1.CustomResourceDefinition{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name: crdName,
+		},
+		Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+			Group:   resource.Group,
+			Version: resource.Version,
+			Scope:   resource.Scope,
+			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+				Singular: resource.Name,
+				Plural:   resource.Plural,
+				Kind:     resource.Kind,
+			},
+		},
+	}
+
+	_, err := k.apiExtensionClient.ApiextensionsV1beta1().CustomResourceDefinitions().Create(crd)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (k *k8sOps) ValidateCRD(resource CustomResource, timeout, retryInterval time.Duration) error {
+	crdName := fmt.Sprintf("%s.%s", resource.Plural, resource.Group)
+	return wait.Poll(timeout, retryInterval, func() (bool, error) {
+		crd, err := k.apiExtensionClient.ApiextensionsV1beta1().CustomResourceDefinitions().Get(crdName, meta_v1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, cond := range crd.Status.Conditions {
+			switch cond.Type {
+			case apiextensionsv1beta1.Established:
+				if cond.Status == apiextensionsv1beta1.ConditionTrue {
+					return true, nil
+				}
+			case apiextensionsv1beta1.NamesAccepted:
+				if cond.Status == apiextensionsv1beta1.ConditionFalse {
+					return false, fmt.Errorf("name conflict: %v", cond.Reason)
+				}
+			}
+		}
+		return false, nil
+	})
+}
+
+// CRD APIs - END
+
+// Object APIs - BEGIN
+
+func (k *k8sOps) getDynamicClient(object runtime.Object) (dynamic.ResourceInterface, error) {
+
+	objectType, err := meta.TypeAccessor(object)
+	if err != nil {
+		return nil, err
+	}
+
+	return k.dynamicInterface.Resource(object.GetObjectKind().GroupVersionKind().GroupVersion().WithResource(strings.ToLower(objectType.GetKind()) + "s")), nil
+}
+
+// GetObject returns the latest object given a generic Object
+func (k *k8sOps) GetObject(object runtime.Object) (runtime.Object, error) {
+	client, err := k.getDynamicClient(object)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata, err := meta.Accessor(object)
+	if err != nil {
+		return nil, err
+	}
+	return client.Get(metadata.GetName(), meta_v1.GetOptions{}, "")
+}
+
+// UpdateObject updates a generic Object
+func (k *k8sOps) UpdateObject(object runtime.Object) (runtime.Object, error) {
+	unstructured, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		return nil, fmt.Errorf("Unable to cast object to unstructured: %v", object)
+	}
+
+	client, err := k.getDynamicClient(object)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Update(unstructured, meta_v1.UpdateOptions{})
+}
+
+// Object APIs - BEGIN
+
 func (k *k8sOps) appsClient() v1beta2.AppsV1beta2Interface {
 	return k.client.AppsV1beta2()
 }
 
-// getK8sClient instantiates a k8s client
-func (k *k8sOps) getK8sClient() (*kubernetes.Clientset, *rest.RESTClient, storkclientset.Interface, error) {
-	var k8sClient *kubernetes.Clientset
-	var restClient *rest.RESTClient
-	var storkClient storkclientset.Interface
+// setK8sClient instantiates a k8s client
+func (k *k8sOps) setK8sClient() error {
 	var err error
 
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if len(kubeconfig) > 0 {
-		k8sClient, restClient, storkClient, err = k.loadClientFromKubeconfig(kubeconfig)
+	if k.config != nil {
+		err = k.loadClientFor(k.config)
 	} else {
-		k8sClient, restClient, storkClient, err = k.loadClientFromServiceAccount()
-	}
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if len(kubeconfig) > 0 {
+			err = k.loadClientFromKubeconfig(kubeconfig)
+		} else {
+			err = k.loadClientFromServiceAccount()
+		}
 
+	}
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	if k8sClient == nil {
-		return nil, nil, nil, ErrK8SApiAccountNotSet
+	if k.client == nil {
+		return ErrK8SApiAccountNotSet
 	}
 
-	return k8sClient, restClient, storkClient, nil
+	return nil
 }
 
 // loadClientFromServiceAccount loads a k8s client from a ServiceAccount specified in the pod running px
-func (k *k8sOps) loadClientFromServiceAccount() (
-	*kubernetes.Clientset, *rest.RESTClient, storkclientset.Interface, error) {
+func (k *k8sOps) loadClientFromServiceAccount() error {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
 	k.config = config
-	return loadClientFor(config)
+	return k.loadClientFor(config)
 }
 
-func (k *k8sOps) loadClientFromKubeconfig(kubeconfig string) (
-	*kubernetes.Clientset, *rest.RESTClient, storkclientset.Interface, error) {
+func (k *k8sOps) loadClientFromKubeconfig(kubeconfig string) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
 	k.config = config
-	return loadClientFor(config)
+	return k.loadClientFor(config)
 }
 
-func loadClientFor(config *rest.Config) (
-	*kubernetes.Clientset, *rest.RESTClient, storkclientset.Interface, error) {
-	client, err := kubernetes.NewForConfig(config)
+func (k *k8sOps) loadClientFor(config *rest.Config) error {
+	var err error
+	k.client, err = kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	snapClient, _, err := snap_client.NewClient(config)
+	k.snapClient, _, err = snap_client.NewClient(config)
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	storkClient, err := storkclientset.NewForConfig(config)
+	k.storkClient, err = storkclientset.NewForConfig(config)
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	return client, snapClient, storkClient, nil
+	k.apiExtensionClient, err = apiextensionsclient.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	k.dynamicInterface, err = dynamic.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func roundUpSize(volumeSizeBytes int64, allocationUnitBytes int64) int64 {

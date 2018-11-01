@@ -1,4 +1,4 @@
-FROM golang:1.9.3
+FROM golang:1.11
 MAINTAINER harsh@portworx.com
 
 RUN mkdir -p /go/src/github.com/portworx/talisman

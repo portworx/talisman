@@ -5,13 +5,13 @@ import (
 	"reflect"
 	"time"
 
-	portworx "github.com/portworx/talisman/pkg/apis/portworx.com"
-	api "github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
+	portworx "github.com/portworx/talisman/pkg/apis/portworx"
+	api "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	clientset "github.com/portworx/talisman/pkg/client/clientset/versioned"
 	"github.com/portworx/talisman/pkg/client/clientset/versioned/scheme"
 	samplescheme "github.com/portworx/talisman/pkg/client/clientset/versioned/scheme"
 	informers "github.com/portworx/talisman/pkg/client/informers/externalversions"
-	listers "github.com/portworx/talisman/pkg/client/listers/portworx.com/v1alpha1"
+	listers "github.com/portworx/talisman/pkg/client/listers/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/cluster/px"
 	"github.com/portworx/talisman/pkg/crd"
 	"github.com/sirupsen/logrus"
@@ -86,11 +86,13 @@ func New(
 	pxoperatorInformerFactory informers.SharedInformerFactory) *Controller {
 
 	// obtain references to shared index informers for the PX cluster types
-	pxInformer := pxoperatorInformerFactory.Portworx().V1alpha1().Clusters()
+	pxInformer := pxoperatorInformerFactory.Portworx().V1beta1().Clusters()
 
 	// Add portworx types to the default Kubernetes Scheme so Events can be
 	// logged for them
-	samplescheme.AddToScheme(scheme.Scheme)
+	if err := samplescheme.AddToScheme(scheme.Scheme); err != nil {
+		logrus.Fatalf("failed to add scheme due to: %v", err)
+	}
 
 	resources := []crd.CustomResource{
 		{

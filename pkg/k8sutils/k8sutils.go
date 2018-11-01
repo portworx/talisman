@@ -47,7 +47,7 @@ func New(kubeconfig string) (*Instance, error) {
 		logrus.Debugf("using kubeconfig: %s to create k8s client", kubeconfig)
 		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 	} else {
-		logrus.Debugf("will use in-cluster config to create k8s client", kubeconfig)
+		logrus.Debugf("will use in-cluster config to create k8s client")
 		cfg, err = rest.InClusterConfig()
 	}
 

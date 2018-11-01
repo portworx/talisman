@@ -3,41 +3,26 @@
 # Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
 # for detailed Gopkg.toml documentation.
 #
-# required = ["github.com/user/thing/cmd/thing"]
-# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
-#
-# [[constraint]]
-#   name = "github.com/user/project"
-#   version = "1.0.0"
-#
-# [[constraint]]
-#   name = "github.com/user/project2"
-#   branch = "dev"
-#   source = "github.com/myfork/project2"
-#
-# [[override]]
-#   name = "github.com/x/y"
-#   version = "2.4.0"
-#
-# [prune]
-#   non-go = false
-#   go-tests = true
-#   unused-packages = true
+required = ["k8s.io/code-generator/cmd/client-gen"]
+
+[[constraint]]
+  name = "k8s.io/code-generator"
+  branch = "release-1.12"
 
 [[constraint]]
   name = "k8s.io/api"
-  branch = "release-1.8"
+  version = "kubernetes-1.12.0"
+
+[[constraint]]
+  name = "k8s.io/apimachinery"
+  version = "kubernetes-1.12.0"
 
 [[constraint]]
   name = "k8s.io/client-go"
-  version = "v5.0.0"
+  version = "kubernetes-1.12.0"
 
 [[constraint]]
   name = "github.com/libopenstorage/openstorage"
-  revision = "453be74da906d1676dca8924a339c5e25e20dce7"
-
-[[constraint]]
-  name = "github.com/portworx/sched-ops"
   branch = "master"
 
 [[override]]
@@ -45,5 +30,19 @@
   version = "v1.3.1-coreos.6"
 
 [prune]
+  non-go = true
   go-tests = true
   unused-packages = true
+
+# Reference: https://github.com/kubernetes/sample-controller/issues/6
+  [[prune.project]]
+    name = "k8s.io/code-generator"
+    unused-packages = false
+    non-go = false
+    go-tests = false
+
+  [[prune.project]]
+    name = "k8s.io/gengo"
+    unused-packages = false
+    non-go = false
+    go-tests = false

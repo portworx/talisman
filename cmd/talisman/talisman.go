@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/portworx/talisman/pkg/apis/portworx.com/v1alpha1"
+	"github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/cluster/px"
 	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/portworx/talisman/pkg/version"
@@ -63,8 +63,8 @@ func doUpgrade() {
 	}
 
 	// Create a new spec for the PX cluster. Currently, only changing the PX version is supported.
-	newSpec := &v1alpha1.Cluster{
-		Spec: v1alpha1.ClusterSpec{
+	newSpec := &v1beta1.Cluster{
+		Spec: v1beta1.ClusterSpec{
 			OCIMonImage: newOCIMonImage,
 			OCIMonTag:   newOCIMonTag,
 			PXImage:     newPXImage,
