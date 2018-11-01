@@ -73,7 +73,7 @@ rules:
   - watch
   - delete
 - apiGroups:
-  - portworx.com
+  - portworx.io
   resources:
   - "*"
   verbs:

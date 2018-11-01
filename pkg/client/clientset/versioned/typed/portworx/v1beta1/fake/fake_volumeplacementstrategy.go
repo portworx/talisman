@@ -34,9 +34,9 @@ type FakeVolumePlacementStrategies struct {
 	ns   string
 }
 
-var volumeplacementstrategiesResource = schema.GroupVersionResource{Group: "portworx.com", Version: "v1beta1", Resource: "volumeplacementstrategies"}
+var volumeplacementstrategiesResource = schema.GroupVersionResource{Group: "portworx.io", Version: "v1beta1", Resource: "volumeplacementstrategies"}
 
-var volumeplacementstrategiesKind = schema.GroupVersionKind{Group: "portworx.com", Version: "v1beta1", Kind: "VolumePlacementStrategy"}
+var volumeplacementstrategiesKind = schema.GroupVersionKind{Group: "portworx.io", Version: "v1beta1", Kind: "VolumePlacementStrategy"}
 
 // Get takes name of the volumePlacementStrategy, and returns the corresponding volumePlacementStrategy object, and an error if there is any.
 func (c *FakeVolumePlacementStrategies) Get(name string, options v1.GetOptions) (result *v1beta1.VolumePlacementStrategy, err error) {

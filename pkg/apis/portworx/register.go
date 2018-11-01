@@ -18,7 +18,7 @@ package portworx
 
 const (
 	// GroupName is the group name for the portworx CRD
-	GroupName = "portworx.com"
+	GroupName = "portworx.io"
 	// Version is the version of the portworx CRD
 	Version = "v1beta1"
 )
