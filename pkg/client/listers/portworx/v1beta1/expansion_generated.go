@@ -29,7 +29,3 @@ type ClusterNamespaceListerExpansion interface{}
 // VolumePlacementStrategyListerExpansion allows custom methods to be added to
 // VolumePlacementStrategyLister.
 type VolumePlacementStrategyListerExpansion interface{}
-
-// VolumePlacementStrategyNamespaceListerExpansion allows custom methods to be added to
-// VolumePlacementStrategyNamespaceLister.
-type VolumePlacementStrategyNamespaceListerExpansion interface{}

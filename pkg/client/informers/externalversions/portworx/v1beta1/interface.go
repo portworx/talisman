@@ -48,5 +48,5 @@ func (v *version) Clusters() ClusterInformer {
 
 // VolumePlacementStrategies returns a VolumePlacementStrategyInformer.
 func (v *version) VolumePlacementStrategies() VolumePlacementStrategyInformer {
-	return &volumePlacementStrategyInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+	return &volumePlacementStrategyInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

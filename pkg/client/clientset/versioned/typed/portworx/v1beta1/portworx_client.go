@@ -40,8 +40,8 @@ func (c *PortworxV1beta1Client) Clusters(namespace string) ClusterInterface {
 	return newClusters(c, namespace)
 }
 
-func (c *PortworxV1beta1Client) VolumePlacementStrategies(namespace string) VolumePlacementStrategyInterface {
-	return newVolumePlacementStrategies(c, namespace)
+func (c *PortworxV1beta1Client) VolumePlacementStrategies() VolumePlacementStrategyInterface {
+	return newVolumePlacementStrategies(c)
 }
 
 // NewForConfig creates a new PortworxV1beta1Client for the given config.

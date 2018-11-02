@@ -32,8 +32,8 @@ func (c *FakePortworxV1beta1) Clusters(namespace string) v1beta1.ClusterInterfac
 	return &FakeClusters{c, namespace}
 }
 
-func (c *FakePortworxV1beta1) VolumePlacementStrategies(namespace string) v1beta1.VolumePlacementStrategyInterface {
-	return &FakeVolumePlacementStrategies{c, namespace}
+func (c *FakePortworxV1beta1) VolumePlacementStrategies() v1beta1.VolumePlacementStrategyInterface {
+	return &FakeVolumePlacementStrategies{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

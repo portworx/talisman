@@ -31,7 +31,6 @@ import (
 // FakeVolumePlacementStrategies implements VolumePlacementStrategyInterface
 type FakeVolumePlacementStrategies struct {
 	Fake *FakePortworxV1beta1
-	ns   string
 }
 
 var volumeplacementstrategiesResource = schema.GroupVersionResource{Group: "portworx.io", Version: "v1beta1", Resource: "volumeplacementstrategies"}
@@ -41,8 +40,7 @@ var volumeplacementstrategiesKind = schema.GroupVersionKind{Group: "portworx.io"
 // Get takes name of the volumePlacementStrategy, and returns the corresponding volumePlacementStrategy object, and an error if there is any.
 func (c *FakeVolumePlacementStrategies) Get(name string, options v1.GetOptions) (result *v1beta1.VolumePlacementStrategy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(volumeplacementstrategiesResource, c.ns, name), &v1beta1.VolumePlacementStrategy{})
-
+		Invokes(testing.NewRootGetAction(volumeplacementstrategiesResource, name), &v1beta1.VolumePlacementStrategy{})
 	if obj == nil {
 		return nil, err
 	}
@@ -52,8 +50,7 @@ func (c *FakeVolumePlacementStrategies) Get(name string, options v1.GetOptions) 
 // List takes label and field selectors, and returns the list of VolumePlacementStrategies that match those selectors.
 func (c *FakeVolumePlacementStrategies) List(opts v1.ListOptions) (result *v1beta1.VolumePlacementStrategyList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(volumeplacementstrategiesResource, volumeplacementstrategiesKind, c.ns, opts), &v1beta1.VolumePlacementStrategyList{})
-
+		Invokes(testing.NewRootListAction(volumeplacementstrategiesResource, volumeplacementstrategiesKind, opts), &v1beta1.VolumePlacementStrategyList{})
 	if obj == nil {
 		return nil, err
 	}
@@ -74,15 +71,13 @@ func (c *FakeVolumePlacementStrategies) List(opts v1.ListOptions) (result *v1bet
 // Watch returns a watch.Interface that watches the requested volumePlacementStrategies.
 func (c *FakeVolumePlacementStrategies) Watch(opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(volumeplacementstrategiesResource, c.ns, opts))
-
+		InvokesWatch(testing.NewRootWatchAction(volumeplacementstrategiesResource, opts))
 }
 
 // Create takes the representation of a volumePlacementStrategy and creates it.  Returns the server's representation of the volumePlacementStrategy, and an error, if there is any.
 func (c *FakeVolumePlacementStrategies) Create(volumePlacementStrategy *v1beta1.VolumePlacementStrategy) (result *v1beta1.VolumePlacementStrategy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(volumeplacementstrategiesResource, c.ns, volumePlacementStrategy), &v1beta1.VolumePlacementStrategy{})
-
+		Invokes(testing.NewRootCreateAction(volumeplacementstrategiesResource, volumePlacementStrategy), &v1beta1.VolumePlacementStrategy{})
 	if obj == nil {
 		return nil, err
 	}
@@ -92,8 +87,7 @@ func (c *FakeVolumePlacementStrategies) Create(volumePlacementStrategy *v1beta1.
 // Update takes the representation of a volumePlacementStrategy and updates it. Returns the server's representation of the volumePlacementStrategy, and an error, if there is any.
 func (c *FakeVolumePlacementStrategies) Update(volumePlacementStrategy *v1beta1.VolumePlacementStrategy) (result *v1beta1.VolumePlacementStrategy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(volumeplacementstrategiesResource, c.ns, volumePlacementStrategy), &v1beta1.VolumePlacementStrategy{})
-
+		Invokes(testing.NewRootUpdateAction(volumeplacementstrategiesResource, volumePlacementStrategy), &v1beta1.VolumePlacementStrategy{})
 	if obj == nil {
 		return nil, err
 	}
@@ -103,14 +97,13 @@ func (c *FakeVolumePlacementStrategies) Update(volumePlacementStrategy *v1beta1.
 // Delete takes name of the volumePlacementStrategy and deletes it. Returns an error if one occurs.
 func (c *FakeVolumePlacementStrategies) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(volumeplacementstrategiesResource, c.ns, name), &v1beta1.VolumePlacementStrategy{})
-
+		Invokes(testing.NewRootDeleteAction(volumeplacementstrategiesResource, name), &v1beta1.VolumePlacementStrategy{})
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeVolumePlacementStrategies) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(volumeplacementstrategiesResource, c.ns, listOptions)
+	action := testing.NewRootDeleteCollectionAction(volumeplacementstrategiesResource, listOptions)
 
 	_, err := c.Fake.Invokes(action, &v1beta1.VolumePlacementStrategyList{})
 	return err
@@ -119,8 +112,7 @@ func (c *FakeVolumePlacementStrategies) DeleteCollection(options *v1.DeleteOptio
 // Patch applies the patch and returns the patched volumePlacementStrategy.
 func (c *FakeVolumePlacementStrategies) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.VolumePlacementStrategy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(volumeplacementstrategiesResource, c.ns, name, data, subresources...), &v1beta1.VolumePlacementStrategy{})
-
+		Invokes(testing.NewRootPatchSubresourceAction(volumeplacementstrategiesResource, name, data, subresources...), &v1beta1.VolumePlacementStrategy{})
 	if obj == nil {
 		return nil, err
 	}
