@@ -30,7 +30,7 @@ import (
 // VolumePlacementStrategiesGetter has a method to return a VolumePlacementStrategyInterface.
 // A group's client should implement this interface.
 type VolumePlacementStrategiesGetter interface {
-	VolumePlacementStrategies(namespace string) VolumePlacementStrategyInterface
+	VolumePlacementStrategies() VolumePlacementStrategyInterface
 }
 
 // VolumePlacementStrategyInterface has methods to work with VolumePlacementStrategy resources.
@@ -49,14 +49,12 @@ type VolumePlacementStrategyInterface interface {
 // volumePlacementStrategies implements VolumePlacementStrategyInterface
 type volumePlacementStrategies struct {
 	client rest.Interface
-	ns     string
 }
 
 // newVolumePlacementStrategies returns a VolumePlacementStrategies
-func newVolumePlacementStrategies(c *PortworxV1beta1Client, namespace string) *volumePlacementStrategies {
+func newVolumePlacementStrategies(c *PortworxV1beta1Client) *volumePlacementStrategies {
 	return &volumePlacementStrategies{
 		client: c.RESTClient(),
-		ns:     namespace,
 	}
 }
 
@@ -64,7 +62,6 @@ func newVolumePlacementStrategies(c *PortworxV1beta1Client, namespace string) *v
 func (c *volumePlacementStrategies) Get(name string, options v1.GetOptions) (result *v1beta1.VolumePlacementStrategy, err error) {
 	result = &v1beta1.VolumePlacementStrategy{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
@@ -77,7 +74,6 @@ func (c *volumePlacementStrategies) Get(name string, options v1.GetOptions) (res
 func (c *volumePlacementStrategies) List(opts v1.ListOptions) (result *v1beta1.VolumePlacementStrategyList, err error) {
 	result = &v1beta1.VolumePlacementStrategyList{}
 	err = c.client.Get().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Do().
@@ -89,7 +85,6 @@ func (c *volumePlacementStrategies) List(opts v1.ListOptions) (result *v1beta1.V
 func (c *volumePlacementStrategies) Watch(opts v1.ListOptions) (watch.Interface, error) {
 	opts.Watch = true
 	return c.client.Get().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Watch()
@@ -99,7 +94,6 @@ func (c *volumePlacementStrategies) Watch(opts v1.ListOptions) (watch.Interface,
 func (c *volumePlacementStrategies) Create(volumePlacementStrategy *v1beta1.VolumePlacementStrategy) (result *v1beta1.VolumePlacementStrategy, err error) {
 	result = &v1beta1.VolumePlacementStrategy{}
 	err = c.client.Post().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		Body(volumePlacementStrategy).
 		Do().
@@ -111,7 +105,6 @@ func (c *volumePlacementStrategies) Create(volumePlacementStrategy *v1beta1.Volu
 func (c *volumePlacementStrategies) Update(volumePlacementStrategy *v1beta1.VolumePlacementStrategy) (result *v1beta1.VolumePlacementStrategy, err error) {
 	result = &v1beta1.VolumePlacementStrategy{}
 	err = c.client.Put().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		Name(volumePlacementStrategy.Name).
 		Body(volumePlacementStrategy).
@@ -123,7 +116,6 @@ func (c *volumePlacementStrategies) Update(volumePlacementStrategy *v1beta1.Volu
 // Delete takes name of the volumePlacementStrategy and deletes it. Returns an error if one occurs.
 func (c *volumePlacementStrategies) Delete(name string, options *v1.DeleteOptions) error {
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		Name(name).
 		Body(options).
@@ -134,7 +126,6 @@ func (c *volumePlacementStrategies) Delete(name string, options *v1.DeleteOption
 // DeleteCollection deletes a collection of objects.
 func (c *volumePlacementStrategies) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
 	return c.client.Delete().
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
 		Body(options).
@@ -146,7 +137,6 @@ func (c *volumePlacementStrategies) DeleteCollection(options *v1.DeleteOptions, 
 func (c *volumePlacementStrategies) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.VolumePlacementStrategy, err error) {
 	result = &v1beta1.VolumePlacementStrategy{}
 	err = c.client.Patch(pt).
-		Namespace(c.ns).
 		Resource("volumeplacementstrategies").
 		SubResource(subresources...).
 		Name(name).

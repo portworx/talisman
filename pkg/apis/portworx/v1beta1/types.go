@@ -128,6 +128,7 @@ type Placement struct {
 
 // +genclient
 // +genclient:noStatus
+// +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // VolumePlacementStrategy specifies a spec for volume placement in the cluster

@@ -29,8 +29,8 @@ import (
 type VolumePlacementStrategyLister interface {
 	// List lists all VolumePlacementStrategies in the indexer.
 	List(selector labels.Selector) (ret []*v1beta1.VolumePlacementStrategy, err error)
-	// VolumePlacementStrategies returns an object that can list and get VolumePlacementStrategies.
-	VolumePlacementStrategies(namespace string) VolumePlacementStrategyNamespaceLister
+	// Get retrieves the VolumePlacementStrategy from the index for a given name.
+	Get(name string) (*v1beta1.VolumePlacementStrategy, error)
 	VolumePlacementStrategyListerExpansion
 }
 
@@ -52,38 +52,9 @@ func (s *volumePlacementStrategyLister) List(selector labels.Selector) (ret []*v
 	return ret, err
 }
 
-// VolumePlacementStrategies returns an object that can list and get VolumePlacementStrategies.
-func (s *volumePlacementStrategyLister) VolumePlacementStrategies(namespace string) VolumePlacementStrategyNamespaceLister {
-	return volumePlacementStrategyNamespaceLister{indexer: s.indexer, namespace: namespace}
-}
-
-// VolumePlacementStrategyNamespaceLister helps list and get VolumePlacementStrategies.
-type VolumePlacementStrategyNamespaceLister interface {
-	// List lists all VolumePlacementStrategies in the indexer for a given namespace.
-	List(selector labels.Selector) (ret []*v1beta1.VolumePlacementStrategy, err error)
-	// Get retrieves the VolumePlacementStrategy from the indexer for a given namespace and name.
-	Get(name string) (*v1beta1.VolumePlacementStrategy, error)
-	VolumePlacementStrategyNamespaceListerExpansion
-}
-
-// volumePlacementStrategyNamespaceLister implements the VolumePlacementStrategyNamespaceLister
-// interface.
-type volumePlacementStrategyNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all VolumePlacementStrategies in the indexer for a given namespace.
-func (s volumePlacementStrategyNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.VolumePlacementStrategy, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.VolumePlacementStrategy))
-	})
-	return ret, err
-}
-
-// Get retrieves the VolumePlacementStrategy from the indexer for a given namespace and name.
-func (s volumePlacementStrategyNamespaceLister) Get(name string) (*v1beta1.VolumePlacementStrategy, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+// Get retrieves the VolumePlacementStrategy from the index for a given name.
+func (s *volumePlacementStrategyLister) Get(name string) (*v1beta1.VolumePlacementStrategy, error) {
+	obj, exists, err := s.indexer.GetByKey(name)
 	if err != nil {
 		return nil, err
 	}
