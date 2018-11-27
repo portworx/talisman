@@ -31,7 +31,10 @@ import (
 
 type pxInstallType string
 
-var errUsingInternalEtcd = fmt.Errorf("cluster is using internal etcd")
+var (
+	errUsingInternalEtcd = fmt.Errorf("cluster is using internal etcd")
+	configMapNameRegex   = regexp.MustCompile("[^a-zA-Z0-9]+")
+)
 
 const (
 	pxInstallTypeOCI       pxInstallType = "oci"
@@ -1076,11 +1079,12 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
+	strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
 	configMaps := [4]string{
 		lhConfigMap,
 		storkControllerConfigMap,
-		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, clusterName),
-		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, clusterName),
+		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
+		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 	}
 	for _, cm := range configMaps {
 		err = ops.k8sOps.DeleteConfigMap(cm, pxDefaultNamespace)
