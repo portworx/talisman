@@ -6,6 +6,26 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// EnforcementType Defines the types of enforcement on the given rules
+type EnforcementType string
+
+const (
+	// EnforcementRequired specifies that the rule is required and must be strictly enforced
+	EnforcementRequired EnforcementType = "required"
+	// EnforcementPreferred specifies that the rule is preferred and can be best effort
+	EnforcementPreferred EnforcementType = "preferred"
+)
+
+// This specifies the type an affinity rule can take
+type AffinityRuleType string
+
+const (
+	// Affinity means the rule specifies an affinity to objects that match the below label selector requirements
+	Affinity AffinityRuleType = "affinity"
+	// AntiAffinity means the rule specifies an anti-affinity to objects that match the below label selector requirements
+	AntiAffinity AffinityRuleType = "antiAffinity"
+)
+
 // +genclient
 // +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -169,9 +189,9 @@ type VolumePlacementRule struct {
 	Weight int64 `json:"weight,omitempty"`
 	// Enforcement specifies the rule enforcement policy. Can take values: required or preferred.
 	// (optional)
-	Enforcement api.VolumePlacementRule_EnforcementType `json:"enforcement,omitempty"`
+	Enforcement EnforcementType `json:"enforcement,omitempty"`
 	// Type is the type of the affinity rule
-	Type api.VolumePlacementRule_AffinityRuleType `json:"type,omitempty"`
+	Type AffinityRuleType `json:"type,omitempty"`
 	// MatchExpressions is a list of label selector requirements. The requirements are ANDed.
 	MatchExpressions []*meta.LabelSelectorRequirement `json:"matchExpressions,omitempty"`
 }
