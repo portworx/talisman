@@ -6,8 +6,9 @@
 .PHONY: version all operator run clean container deploy talisman
 
 DOCKER_HUB_TAG ?= latest
+PX_NODE_WIPER_TAG ?= latest
 DOCKER_PULLER_IMG=$(DOCKER_HUB_REPO)/docker-puller:$(DOCKER_HUB_TAG)
-PX_NODE_WIPER_IMG=$(DOCKER_HUB_REPO)/px-node-wiper:$(DOCKER_HUB_TAG)
+PX_NODE_WIPER_IMG=$(DOCKER_HUB_REPO)/px-node-wiper:$(PX_NODE_WIPER_TAG)
 TALISMAN_IMG=$(DOCKER_HUB_REPO)/talisman:$(DOCKER_HUB_TAG)
 
 SHA    := $(shell git rev-parse --short HEAD)
