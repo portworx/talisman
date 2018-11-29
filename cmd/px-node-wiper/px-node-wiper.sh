@@ -79,10 +79,9 @@ fi
 
 
 # Remove systemd service (if any)
-run_with_nsenter "systemctl stop portworx" true
-run_with_nsenter "systemctl disable portworx" true
-run_with_nsenter "rm -rf /etc/systemd/system/portworx.service" false
-run_with_nsenter "rm -rf /etc/systemd/system/portworx-reboot.service" false
+systemctl stop portworx || true
+systemctl disable portworx || true
+rm -rf /etc/systemd/system/*portworx*
 
 # unmount oci
 run_with_nsenter "umount $OPTPWX/oci" true

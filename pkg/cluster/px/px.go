@@ -44,6 +44,10 @@ const (
 	pxEnableLabelKey                     = "px/enabled"
 	dsOptPwxVolumeName                   = "optpwx"
 	dsEtcPwxVolumeName                   = "etcpwx"
+	dsDbusVolumeName                     = "dbus"
+	dsSysdVolumeName                     = "sysdmount"
+	sysdmount                            = "/etc/systemd/system"
+	dbusPath                             = "/var/run/dbus"
 	pksPersistentStoreRoot               = "/var/vcap/store"
 	pxOptPwx                             = "/opt/pwx"
 	pxEtcdPwx                            = "/etc/pwx"
@@ -1152,6 +1156,14 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot string) error {
 									Name:      dsOptPwxVolumeName,
 									MountPath: pxOptPwx,
 								},
+								{
+									Name:      dsDbusVolumeName,
+									MountPath: dbusPath,
+								},
+								{
+									Name:      dsSysdVolumeName,
+									MountPath: sysdmount,
+								},
 							},
 						},
 					},
@@ -1179,6 +1191,22 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot string) error {
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
 									Path: pwxHostPathRoot + pxOptPwx,
+								},
+							},
+						},
+						{
+							Name: dsDbusVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: dbusPath,
+								},
+							},
+						},
+						{
+							Name: dsSysdVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: sysdmount,
 								},
 							},
 						},
