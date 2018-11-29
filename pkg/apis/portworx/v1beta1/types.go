@@ -16,7 +16,7 @@ const (
 	EnforcementPreferred EnforcementType = "preferred"
 )
 
-// This specifies the type an affinity rule can take
+// AffinityRuleType specifies the type an affinity rule can take
 type AffinityRuleType string
 
 const (
