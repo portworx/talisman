@@ -3,7 +3,7 @@
 #          https://raw.githubusercontent.com/lpabon/quartermaster/dev/Makefile
 #
 
-.PHONY: version all operator run clean container deploy talisman
+.PHONY: version all run clean container deploy talisman
 
 DOCKER_HUB_TAG ?= latest
 PX_NODE_WIPER_TAG ?= latest
@@ -56,15 +56,11 @@ GOFMT := gofmt
 
 .DEFAULT: all
 
-all: clean pretest operator talisman
+all: clean pretest talisman
 
 # print the version
 version:
 	@echo $(VERSION)
-
-operator:
-	mkdir -p $(BIN)
-	env $(GOENV) go build $(BUILD_OPTIONS) -o $(BIN)/operator cmd/operator/main.go
 
 talisman:
 	mkdir -p $(BIN)
