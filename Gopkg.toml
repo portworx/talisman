@@ -18,10 +18,6 @@ required = ["k8s.io/code-generator/cmd/client-gen"]
   version = "kubernetes-1.11.0"
 
 [[constraint]]
-  name = "github.com/portworx/sched-ops"
-  branch = "kubernetes-1.11"
-
-[[constraint]]
   name = "k8s.io/apiextensions-apiserver"
   version = "kubernetes-1.11.0"
 
@@ -29,9 +25,9 @@ required = ["k8s.io/code-generator/cmd/client-gen"]
   name = "k8s.io/client-go"
   version = "8.0.0"
 
-[[constraint]]
-  name = "github.com/libopenstorage/openstorage"
+[[override]]
   branch = "master"
+  name = "github.com/libopenstorage/stork"
 
 [[override]]
   name = "github.com/coreos/bbolt"

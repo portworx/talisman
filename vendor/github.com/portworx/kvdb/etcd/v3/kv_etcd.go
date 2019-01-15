@@ -12,7 +12,6 @@ import (
 
 	e "github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
-	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/portworx/kvdb"
@@ -21,15 +20,15 @@ import (
 	"github.com/portworx/kvdb/mem"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
 	// Name is the name of this kvdb implementation.
 	Name                      = "etcdv3-kv"
 	defaultKvRequestTimeout   = 10 * time.Second
-	defaultMaintenanceTimeout = 5 * time.Second
+	defaultMaintenanceTimeout = 7 * time.Second
+	// defaultDefragTimeout in seconds is the timeout for defrag to complete
+	defaultDefragTimeout = 30
 	// defaultSessionTimeout in seconds is used for etcd watch
 	// to detect connectivity issues
 	defaultSessionTimeout = 120
@@ -82,8 +81,11 @@ func (w *watchQ) start() {
 		if err != nil {
 			w.done = true
 			logrus.Infof("Watch cb for key %v returned err: %v", key, err)
-			// Indicate the caller that watch has been canceled
-			_ = w.cb(key, w.opaque, nil, kvdb.ErrWatchStopped)
+			if err != kvdb.ErrWatchStopped {
+				// The caller returned an error. Indicate the caller
+				// that the watch has been stopped
+				_ = w.cb(key, w.opaque, nil, kvdb.ErrWatchStopped)
+			} // else we stopped the watch and the caller has been notified
 			// Indicate that watch is returning.
 			close(w.watchRet)
 			break
@@ -150,7 +152,11 @@ func New(
 	// instead of the actual endpoint for which the Status command failed. This causes the etcd
 	// balancer to go into a retry loop trying to fix its healthy endpoints.
 	// https://github.com/etcd-io/etcd/blob/v3.3.1/clientv3/retry.go#L102
-	mClient, err := e.New(cfg)
+	// keepalive is not required for maintenance requests
+	mCfg := cfg
+	mCfg.DialKeepAliveTime = 0
+	mCfg.DialKeepAliveTimeout = 0
+	mClient, err := e.New(mCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +186,12 @@ func (et *etcdKV) Context() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), defaultKvRequestTimeout)
 }
 
-func (et *etcdKV) MaintenanceContext() (context.Context, context.CancelFunc) {
+func (et *etcdKV) MaintenanceContextWithLeader() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(getContextWithLeaderRequirement(), defaultMaintenanceTimeout)
+}
+
+func (et *etcdKV) MaintenanceContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), defaultMaintenanceTimeout)
 }
 
 func (et *etcdKV) Get(key string) (*kvdb.KVPair, error) {
@@ -467,6 +477,7 @@ func (et *etcdKV) CompareAndSet(
 	flags kvdb.KVFlags,
 	prevValue []byte,
 ) (*kvdb.KVPair, error) {
+	fn := "cas"
 	var (
 		leaseResult *e.LeaseGrantResponse
 		txnResponse *e.TxnResponse
@@ -497,7 +508,7 @@ func (et *etcdKV) CompareAndSet(
 		cancel()
 		if txnErr != nil {
 			// Check if we need to retry
-			retry, txnErr := isRetryNeeded(txnErr, "cas", key, i)
+			retry, txnErr := isRetryNeeded(txnErr, fn, key, i)
 			if !retry {
 				// For all other errors return immediately
 				return nil, txnErr
@@ -506,6 +517,7 @@ func (et *etcdKV) CompareAndSet(
 			// server timeout
 			kvPair, err := et.Get(kvp.Key)
 			if err != nil {
+				logrus.Errorf("%v: get after retry failed with error: %v", fn, err)
 				return nil, txnErr
 			}
 			if kvPair.ModifiedIndex == kvp.ModifiedIndex {
@@ -550,6 +562,7 @@ func (et *etcdKV) CompareAndDelete(
 	kvp *kvdb.KVPair,
 	flags kvdb.KVFlags,
 ) (*kvdb.KVPair, error) {
+	fn := "cad"
 	key := et.domain + kvp.Key
 
 	cmp := e.Compare(e.Value(key), "=", string(kvp.Value))
@@ -565,7 +578,7 @@ func (et *etcdKV) CompareAndDelete(
 		cancel()
 		if txnErr != nil {
 			// Check if we need to retry
-			retry, txnErr := isRetryNeeded(txnErr, "cad", key, i)
+			retry, txnErr := isRetryNeeded(txnErr, fn, key, i)
 			if txnErr == kvdb.ErrNotFound {
 				return kvp, nil
 			} else if !retry {
@@ -579,6 +592,7 @@ func (et *etcdKV) CompareAndDelete(
 				// Our command succeeded
 				return kvp, nil
 			} else if err != nil {
+				logrus.Errorf("%v: get after retry failed with error: %v", fn, err)
 				return nil, txnErr
 			}
 			if i == (timeoutMaxRetry - 1) {
@@ -854,10 +868,10 @@ func (et *etcdKV) refreshLock(
 				currentRefresh = time.Now()
 				if err != nil {
 					et.FatalCb(
-						"Error refreshing lock. [Key %v] [Err: %v]"+
+						"Error refreshing lock. [Tag %v] [Err: %v]"+
 							" [Current Refresh: %v] [Previous Refresh: %v]"+
 							" [Modified Index: %v]",
-						keyString, err, currentRefresh, prevRefresh, kvPair.ModifiedIndex,
+						lockMsgString, err, currentRefresh, prevRefresh, kvPair.ModifiedIndex,
 					)
 					l.Err = err
 					l.Unlock()
@@ -891,8 +905,10 @@ func (et *etcdKV) watchStart(
 	}
 	sessionChan := make(chan int, 1)
 	var (
-		session *concurrency.Session
-		err     error
+		session       *concurrency.Session
+		err           error
+		watchStopLock sync.Mutex
+		watchStopped  bool
 	)
 	go func() {
 		session, err = concurrency.NewSession(
@@ -914,7 +930,7 @@ func (et *etcdKV) watchStart(
 		_ = cb(key, opaque, nil, kvdb.ErrWatchStopped)
 		return
 	}
-	ctx, watchCancel := context.WithCancel(context.Background())
+	ctx, watchCancel := context.WithCancel(getContextWithLeaderRequirement())
 	watchRet := make(chan error)
 	watchChan := et.kvClient.Watch(ctx, key, opts...)
 	watchQ := newWatchQ(opaque, cb, watchRet)
@@ -950,14 +966,26 @@ func (et *etcdKV) watchStart(
 			}
 		}
 		logrus.Errorf("Watch on key %v closed without a Cancel response.", key)
-		watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
+		watchStopLock.Lock()
+		// Stop the watch only if it has not been stopped already
+		if !watchStopped {
+			watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
+			watchStopped = true
+		}
+		watchStopLock.Unlock()
 	}()
 
 	select {
 	case <-session.Done(): // closed by etcd
 		// Indicate the caller that watch has been canceled
 		logrus.Errorf("Watch closing session for key: %v", key)
-		watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
+		watchStopLock.Lock()
+		// Stop the watch only if it has not been stopped already
+		if !watchStopped {
+			watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
+			watchStopped = true
+		}
+		watchStopLock.Unlock()
 		watchCancel()
 	case <-watchRet: // error in watcher
 		// Close the context
@@ -1237,14 +1265,14 @@ func (et *etcdKV) AddMember(
 	nodeName string,
 ) (map[string][]string, error) {
 	peerURLs := et.listenPeerUrls(nodeIP, nodePeerPort)
-	ctx, cancel := et.MaintenanceContext()
+	ctx, cancel := et.MaintenanceContextWithLeader()
 	_, err := et.kvClient.MemberAdd(ctx, peerURLs)
 	cancel()
 	if err != nil {
 		return nil, err
 	}
 	resp := make(map[string][]string)
-	ctx, cancel = et.MaintenanceContext()
+	ctx, cancel = et.MaintenanceContextWithLeader()
 	memberListResponse, err := et.kvClient.MemberList(ctx)
 	cancel()
 	if err != nil {
@@ -1261,32 +1289,78 @@ func (et *etcdKV) AddMember(
 	return resp, nil
 }
 
+func (et *etcdKV) UpdateMember(
+	nodeIP string,
+	nodePeerPort string,
+	nodeName string,
+) (map[string][]string, error) {
+	peerURLs := et.listenPeerUrls(nodeIP, nodePeerPort)
+	ctx, cancel := et.MaintenanceContextWithLeader()
+
+	memberListResponse, err := et.kvClient.MemberList(ctx)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+
+	var updateMemberId uint64
+	resp := make(map[string][]string)
+
+	for _, member := range memberListResponse.Members {
+		if member.Name == nodeName {
+			updateMemberId = member.ID
+			resp[member.Name] = peerURLs
+		} else {
+			resp[member.Name] = member.PeerURLs
+		}
+	}
+	if updateMemberId == 0 {
+		return nil, kvdb.ErrMemberDoesNotExist
+	}
+	ctx, cancel = et.MaintenanceContextWithLeader()
+	_, err = et.kvClient.MemberUpdate(ctx, updateMemberId, peerURLs)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (et *etcdKV) RemoveMember(
-	nodeID string,
+	nodeName string,
+	nodeIP string,
 ) error {
-	ctx, cancel := et.MaintenanceContext()
+	ctx, cancel := et.MaintenanceContextWithLeader()
 	memberListResponse, err := et.kvClient.MemberList(ctx)
 	cancel()
 	if err != nil {
 		return err
 	}
 	var (
-		newClientUrls []string
-		memberID      uint64
+		newClientUrls  []string
+		removeMemberID uint64
 	)
 
 	for _, member := range memberListResponse.Members {
-		if member.Name == nodeID {
-			memberID = member.ID
+		if member.Name == "" {
+			// In case of a failed start of an etcd member, the Name field will be empty
+			// We then try to match the IPs.
+			if strings.Contains(member.PeerURLs[0], nodeIP) {
+				removeMemberID = member.ID
+			}
+
+		} else if member.Name == nodeName {
+			removeMemberID = member.ID
 		} else {
+			// This member is healthy and does not need to be removed.
 			for _, clientURL := range member.ClientURLs {
 				newClientUrls = append(newClientUrls, clientURL)
 			}
 		}
 	}
 	et.kvClient.SetEndpoints(newClientUrls...)
-	ctx, cancel = et.MaintenanceContext()
-	_, err = et.kvClient.MemberRemove(ctx, memberID)
+	ctx, cancel = et.MaintenanceContextWithLeader()
+	_, err = et.kvClient.MemberRemove(ctx, removeMemberID)
 	cancel()
 	if err != nil {
 		return err
@@ -1295,7 +1369,7 @@ func (et *etcdKV) RemoveMember(
 }
 
 func (et *etcdKV) ListMembers() (map[string]*kvdb.MemberInfo, error) {
-	ctx, cancel := et.MaintenanceContext()
+	ctx, cancel := et.MaintenanceContextWithLeader()
 	memberListResponse, err := et.kvClient.MemberList(ctx)
 	cancel()
 	if err != nil {
@@ -1315,7 +1389,9 @@ func (et *etcdKV) ListMembers() (map[string]*kvdb.MemberInfo, error) {
 		// the node is unhealthy. For versions >= v3.2.15 they populate
 		// ClientURLs but return an error status
 		if len(member.ClientURLs) != 0 {
-			ctx, cancel = et.MaintenanceContext()
+			// Use the context with no leader requirement as we might be hitting
+			// an endpoint which is down
+			ctx, cancel := et.MaintenanceContext()
 			endpointStatus, err := et.maintenanceClient.Status(
 				ctx,
 				member.ClientURLs[0],
@@ -1337,6 +1413,7 @@ func (et *etcdKV) ListMembers() (map[string]*kvdb.MemberInfo, error) {
 			Leader:     leader,
 			DbSize:     dbSize,
 			IsHealthy:  isHealthy,
+			ID:         strconv.FormatUint(member.ID, 16),
 		}
 	}
 	return resp, nil
@@ -1362,6 +1439,22 @@ func (et *etcdKV) SetEndpoints(endpoints []string) error {
 
 func (et *etcdKV) GetEndpoints() []string {
 	return et.kvClient.Endpoints()
+}
+
+func (et *etcdKV) Defragment(endpoint string, timeout int) error {
+	if timeout < defaultDefragTimeout {
+		timeout = defaultDefragTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(getContextWithLeaderRequirement(), time.Duration(timeout)*time.Second)
+	_, err := et.kvClient.Defragment(ctx, endpoint)
+	cancel()
+	if err != nil {
+		logrus.Warnf("defragment operation on %v failed with error: %v", endpoint, err)
+		return err
+	}
+	return nil
+
 }
 
 func (et *etcdKV) listenPeerUrls(ip string, port string) []string {
@@ -1416,32 +1509,14 @@ func getEtcdPermType(permType kvdb.PermissionType) (e.PermissionType, error) {
 // It returns the provided error.
 func isRetryNeeded(err error, fn string, key string, retryCount int) (bool, error) {
 	switch err {
-	case context.DeadlineExceeded, etcdserver.ErrTimeout, etcdserver.ErrUnhealthy:
-		logrus.Errorf("[%v %v]: kvdb error: %v, retry count: %v\n", fn, key, err, retryCount)
-		time.Sleep(ec.DefaultIntervalBetweenRetries)
-		return true, err
+	case kvdb.ErrNotSupported, kvdb.ErrWatchStopped, kvdb.ErrNotFound, kvdb.ErrExist, kvdb.ErrUnmarshal, kvdb.ErrValueMismatch, kvdb.ErrModified:
+		// For all known kvdb errors no retry is needed
+		return false, err
 	case rpctypes.ErrGRPCEmptyKey:
 		return false, kvdb.ErrNotFound
 	default:
-		if grpcStatusErr, ok := status.FromError(err); ok && grpcStatusErr.Code() == codes.Unavailable {
-			// We have got a grpc error wrapped in grpc.Status with Code Unavailable
-			// From grpc golang docs : google.golang.org/grpc/codes/codes.go
-
-			// Unavailable indicates the service is currently unavailable.
-			// This is a most likely a transient condition and may be corrected
-			// by retrying with a backoff.
-
-			logrus.Errorf("[%v: %v] kvdb grpc error: %v, retry count %v \n", fn, key, err, retryCount)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-			return true, err
-		}
-		if strings.Contains(err.Error(), rpctypes.ErrGRPCTimeout.Error()) {
-			logrus.Errorf("[%v: %v] kvdb grpc timeout: %v, retry count %v \n", fn, key, err, retryCount)
-			time.Sleep(ec.DefaultIntervalBetweenRetries)
-			return true, err
-		}
-
-		// For all other errors return immediately
-		return false, err
+		// For all other errors retry
+		logrus.Errorf("[%v: %v] kvdb error: %v, retry count %v \n", fn, key, err, retryCount)
+		return true, err
 	}
 }

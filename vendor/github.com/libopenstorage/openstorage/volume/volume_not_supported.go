@@ -88,6 +88,14 @@ func (s *statsNotSupported) GetActiveRequests() (*api.ActiveRequests, error) {
 	return nil, nil
 }
 
+// GetCapacityUsage gets exclusive and shared capacity
+// usage of snap
+func (s *statsNotSupported) CapacityUsage(
+	ID string,
+) (*api.CapacityUsageResponse, error) {
+	return nil, ErrNotSupported
+}
+
 type quiesceNotSupported struct{}
 
 func (s *quiesceNotSupported) Quiesce(
@@ -220,6 +228,6 @@ func (cl *cloudMigrateNotSupported) CloudMigrateStart(request *api.CloudMigrateS
 func (cl *cloudMigrateNotSupported) CloudMigrateCancel(request *api.CloudMigrateCancelRequest) error {
 	return ErrNotSupported
 }
-func (cl *cloudMigrateNotSupported) CloudMigrateStatus() (*api.CloudMigrateStatusResponse, error) {
+func (cl *cloudMigrateNotSupported) CloudMigrateStatus(request *api.CloudMigrateStatusRequest) (*api.CloudMigrateStatusResponse, error) {
 	return nil, ErrNotSupported
 }
