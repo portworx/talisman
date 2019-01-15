@@ -85,14 +85,6 @@
   version = "v3.3.10"
 
 [[projects]]
-  digest = "1:ee2b734999dcaacfffaa0a09d9d8bbf4b947f4f5a7ca8ce1b0e297f510817918"
-  name = "github.com/coreos/etcd-operator"
-  packages = ["pkg/util/probe"]
-  pruneopts = "NUT"
-  revision = "a0032c1f9a708d2164f3f03109ece06c5439df80"
-  version = "v0.9.2"
-
-[[projects]]
   digest = "1:0ef770954bca104ee99b3b6b7f9b240605ac03517d9f98cbc1893daa03f3c038"
   name = "github.com/coreos/go-semver"
   packages = ["semver"]
@@ -134,14 +126,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:da25cf063072a10461c19320e82117d85f9d60be4c95a62bc8d5a49acf7d0ca5"
+  digest = "1:eb8f1b1913bffd6e788deee9fe4ba3a4d83267aff6045d3be33105e35ece290b"
   name = "github.com/docker/spdystream"
   packages = [
     ".",
     "spdy",
   ]
   pruneopts = "NUT"
-  revision = "bc6354cbbc295e925e4c611ffe90c1f287ee54db"
+  revision = "6480d4af844c189cf5dd913db24ddd339d3a4f85"
 
 [[projects]]
   digest = "1:81466b4218bf6adddac2572a30ac733a9255919bc2f470b4827a317bd4ee1756"
@@ -332,15 +324,16 @@
   version = "v1.0.1"
 
 [[projects]]
-  digest = "1:b2794c4fa60b88ba7117126ed53aed88e24147951686b00e05da7f970bf9443b"
+  digest = "1:23077f0ac1e8d5cebfa80b9fc0a23d2839b666cc002487ba273549dc38792370"
   name = "github.com/kubernetes-incubator/external-storage"
   packages = [
     "snapshot/pkg/apis/crd/v1",
     "snapshot/pkg/client",
   ]
   pruneopts = "NUT"
-  revision = "193fb3944bf3061e59ae072ab7511861e8868553"
-  version = "v5.2.0"
+  revision = "83aa29470096d814a8075556c4d8d2032dbe4fe0"
+  source = "github.com/libopenstorage/external-storage"
+  version = "v5.1.0-openstorage"
 
 [[projects]]
   branch = "master"
@@ -372,8 +365,7 @@
   revision = "e6b9d043e6a2f5362b379ce9dfc98f6f98983557"
 
 [[projects]]
-  branch = "master"
-  digest = "1:cb0a01c2a3b764e8c68dc01df6c82cc6394b405134a4951591b83db99baf908a"
+  digest = "1:e22a69c214374ef0dae2c847bb392abb33ddcc7ca33a07f5ca5837a16de2173b"
   name = "github.com/libopenstorage/stork"
   packages = [
     "pkg/apis/stork",
@@ -383,7 +375,8 @@
     "pkg/client/clientset/versioned/typed/stork/v1alpha1",
   ]
   pruneopts = "NUT"
-  revision = "abf1e99a5f902c630bbafdea4059ca1cfe318da2"
+  revision = "7e2b610533b9d1a509b21206ff3b6072c897273f"
+  version = "v2.0.1"
 
 [[projects]]
   digest = "1:5985ef4caf91ece5d54817c11ea25f182697534f8ae6521eadcd628c142ac4b6"
@@ -482,15 +475,15 @@
   revision = "110b9af2ff2bfd4aa6b611f9dc4c8599bc56ad20"
 
 [[projects]]
-  branch = "k8s-1.12"
-  digest = "1:b04f2e7b691be6b5e9b4e472d4ded156dd5e2bece645e95c689ab4224c6dba0d"
+  branch = "kubernetes-1.11"
+  digest = "1:2408926a22a1fac2e9ba404b7e2725634de6ce4813bbc8c911b239109f5ed874"
   name = "github.com/portworx/sched-ops"
   packages = [
     "k8s",
     "task",
   ]
   pruneopts = "NUT"
-  revision = "bce671489f9f8c0fe7c288b4c04eaf7374feb18b"
+  revision = "5c8828ee0f968d1a57910aafb9b589e7515116c9"
 
 [[projects]]
   digest = "1:d90953024a4d46f93d08b2b995e9ebb33027d47130fb8b5577485fed14a981bb"
@@ -582,11 +575,10 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:3033eba8bb0c8f2c6720e68e4c14e55b577ae9debb5f5b7b8cc6f319d89edc82"
+  digest = "1:d39e451e542c7c064d7e29050eb50993a7484d4a3b538387c0f2ac32b5b9cdd8"
   name = "golang.org/x/net"
   packages = [
     "context",
-    "context/ctxhttp",
     "http/httpguts",
     "http2",
     "http2/hpack",
@@ -596,17 +588,6 @@
   ]
   pruneopts = "NUT"
   revision = "04a2e542c03f1d053ab3e4d6e5abcd4b66e2be8e"
-
-[[projects]]
-  branch = "master"
-  digest = "1:5283e2ceb6f8134dae6d9a0d0c8101fd15a310fd091eac99f0fd36925955f377"
-  name = "golang.org/x/oauth2"
-  packages = [
-    ".",
-    "internal",
-  ]
-  pruneopts = "NUT"
-  revision = "9dcd33a902f40452422c2367fefcb95b54f9f8f8"
 
 [[projects]]
   branch = "master"
@@ -662,22 +643,6 @@
   ]
   pruneopts = "NUT"
   revision = "40a48ad93fbe707101afb2099b738471f70594ec"
-
-[[projects]]
-  digest = "1:36354a269794d9cb4cebae233f65a966e818f763088370c8524726853a31c96f"
-  name = "google.golang.org/appengine"
-  packages = [
-    "internal",
-    "internal/base",
-    "internal/datastore",
-    "internal/log",
-    "internal/remote_api",
-    "internal/urlfetch",
-    "urlfetch",
-  ]
-  pruneopts = "NUT"
-  revision = "ae0ab99deb4dc413a2b4bd6c8bdd0eb67f1e4d06"
-  version = "v1.2.0"
 
 [[projects]]
   branch = "master"
@@ -743,7 +708,7 @@
   version = "v2.2.1"
 
 [[projects]]
-  digest = "1:c6b0cfc418f5e8bb9169d78f1024cb1c9f3e61c9a76235134d26d3f28ecdf27b"
+  digest = "1:8960ef753a87391086a307122d23cd5007cee93c28189437e4f1b6ed72bffc50"
   name = "k8s.io/api"
   packages = [
     "admissionregistration/v1alpha1",
@@ -757,12 +722,10 @@
     "authorization/v1beta1",
     "autoscaling/v1",
     "autoscaling/v2beta1",
-    "autoscaling/v2beta2",
     "batch/v1",
     "batch/v1beta1",
     "batch/v2alpha1",
     "certificates/v1beta1",
-    "coordination/v1beta1",
     "core/v1",
     "events/v1beta1",
     "extensions/v1beta1",
@@ -779,11 +742,11 @@
     "storage/v1beta1",
   ]
   pruneopts = "NUT"
-  revision = "fd83cbc87e7632ccd8bbab63d2b673d4e0c631cc"
-  version = "kubernetes-1.12.0"
+  revision = "072894a440bdee3a891dea811fe42902311cd2a3"
+  version = "kubernetes-1.11.0"
 
 [[projects]]
-  digest = "1:51f330b7a61ac0e8b6e082490586ff2b18008eb514a67eccbe5ec78ffd32ee25"
+  digest = "1:8d77a31bfcf24a6cb79214e408463706843ddb91ab9ed977e9d8bf4bae1aed36"
   name = "k8s.io/apiextensions-apiserver"
   packages = [
     "pkg/apis/apiextensions",
@@ -793,11 +756,11 @@
     "pkg/client/clientset/clientset/typed/apiextensions/v1beta1",
   ]
   pruneopts = "NUT"
-  revision = "1748dfb29e8a4432b78514bc88a1b07937a9805a"
-  version = "kubernetes-1.12.0"
+  revision = "3de98c57bc05a81cf463e0ad7a0af4cec8a5b510"
+  version = "kubernetes-1.11.0"
 
 [[projects]]
-  digest = "1:8a4733ea2b49cd8ff95865fe55a3617b502adb990bceaacb8b993b096b1f679c"
+  digest = "1:103c7cec8d7f6a7126fff90ba1277ffbf6ac5b5ae4782f772bf789f4a18cf61f"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/errors",
@@ -831,7 +794,6 @@
     "pkg/util/intstr",
     "pkg/util/json",
     "pkg/util/mergepatch",
-    "pkg/util/naming",
     "pkg/util/net",
     "pkg/util/remotecommand",
     "pkg/util/runtime",
@@ -848,11 +810,11 @@
     "third_party/forked/golang/reflect",
   ]
   pruneopts = "NUT"
-  revision = "6dd46049f39503a1fc8d65de4bd566829e95faff"
-  version = "kubernetes-1.12.0"
+  revision = "103fd098999dc9c0c88536f5c9ad2e5da39373ae"
+  version = "kubernetes-1.11.0"
 
 [[projects]]
-  digest = "1:0bd0629995efeb93538edda5973c7efdf7680cbf9d42584163bd5822bd8c7896"
+  digest = "1:bd2375abcb606970015f6a0a665f7b4dce6cddb23c809915143b09a4d2094785"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -869,15 +831,12 @@
     "informers/autoscaling",
     "informers/autoscaling/v1",
     "informers/autoscaling/v2beta1",
-    "informers/autoscaling/v2beta2",
     "informers/batch",
     "informers/batch/v1",
     "informers/batch/v1beta1",
     "informers/batch/v2alpha1",
     "informers/certificates",
     "informers/certificates/v1beta1",
-    "informers/coordination",
-    "informers/coordination/v1beta1",
     "informers/core",
     "informers/core/v1",
     "informers/events",
@@ -915,12 +874,10 @@
     "kubernetes/typed/authorization/v1beta1",
     "kubernetes/typed/autoscaling/v1",
     "kubernetes/typed/autoscaling/v2beta1",
-    "kubernetes/typed/autoscaling/v2beta2",
     "kubernetes/typed/batch/v1",
     "kubernetes/typed/batch/v1beta1",
     "kubernetes/typed/batch/v2alpha1",
     "kubernetes/typed/certificates/v1beta1",
-    "kubernetes/typed/coordination/v1beta1",
     "kubernetes/typed/core/v1",
     "kubernetes/typed/events/v1beta1",
     "kubernetes/typed/extensions/v1beta1",
@@ -942,12 +899,10 @@
     "listers/apps/v1beta2",
     "listers/autoscaling/v1",
     "listers/autoscaling/v2beta1",
-    "listers/autoscaling/v2beta2",
     "listers/batch/v1",
     "listers/batch/v1beta1",
     "listers/batch/v2alpha1",
     "listers/certificates/v1beta1",
-    "listers/coordination/v1beta1",
     "listers/core/v1",
     "listers/events/v1beta1",
     "listers/extensions/v1beta1",
@@ -976,8 +931,6 @@
     "tools/clientcmd/api",
     "tools/clientcmd/api/latest",
     "tools/clientcmd/api/v1",
-    "tools/leaderelection",
-    "tools/leaderelection/resourcelock",
     "tools/metrics",
     "tools/pager",
     "tools/record",
@@ -996,12 +949,12 @@
     "util/workqueue",
   ]
   pruneopts = "NUT"
-  revision = "1638f8970cefaa404ff3a62950f88b08292b2696"
-  version = "kubernetes-1.12.0"
+  revision = "7d04d0e2a0a1a4d4a1cd6baa432a2301492e4e65"
+  version = "v8.0.0"
 
 [[projects]]
-  branch = "release-1.12"
-  digest = "1:e6fffdf0dfeb0d189a7c6d735e76e7564685d3b6513f8b19d3651191cb6b084b"
+  branch = "release-1.11"
+  digest = "1:332f5b5962cb4766ee8db261b948ec6c27a79a0006f1c638b4cbb4a203069aaf"
   name = "k8s.io/code-generator"
   packages = [
     "cmd/client-gen",
@@ -1015,7 +968,7 @@
     "pkg/util",
   ]
   pruneopts = ""
-  revision = "3dcf91f64f638563e5106f21f50c31fa361c918d"
+  revision = "f8cba74510f397bac80157a6c4ccb0ffbc31b9d0"
 
 [[projects]]
   branch = "master"
@@ -1043,7 +996,6 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/coreos/etcd-operator/pkg/util/probe",
     "github.com/libopenstorage/openstorage/api",
     "github.com/libopenstorage/openstorage/api/client/cluster",
     "github.com/libopenstorage/openstorage/api/client/volume",
@@ -1081,8 +1033,6 @@
     "k8s.io/client-go/testing",
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/clientcmd",
-    "k8s.io/client-go/tools/leaderelection",
-    "k8s.io/client-go/tools/leaderelection/resourcelock",
     "k8s.io/client-go/tools/record",
     "k8s.io/client-go/util/flowcontrol",
     "k8s.io/client-go/util/workqueue",
