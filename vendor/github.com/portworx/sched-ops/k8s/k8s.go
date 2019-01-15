@@ -15,6 +15,8 @@ import (
 	"github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
 	storkclientset "github.com/libopenstorage/stork/pkg/client/clientset/versioned"
 	"github.com/portworx/sched-ops/task"
+	talisman_v1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
+	talismanclientset "github.com/portworx/talisman/pkg/client/clientset/versioned"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
 	batch_v1 "k8s.io/api/batch/v1"
@@ -73,6 +75,7 @@ type Ops interface {
 	StorageClassOps
 	PersistentVolumeClaimOps
 	SnapshotOps
+	GroupSnapshotOps
 	RuleOps
 	SecretOps
 	ConfigMapOps
@@ -81,6 +84,7 @@ type Ops interface {
 	ClusterPairOps
 	MigrationOps
 	ObjectOps
+	VolumePlacementStrategyOps
 	GetVersion() (*version.Info, error)
 	SetConfig(config *rest.Config)
 	SetClient(client kubernetes.Interface, snapClient rest.Interface, storkClient storkclientset.Interface, apiExtensionClient apiextensionsclient.Interface, dynamicInterface dynamic.Interface)
@@ -382,6 +386,25 @@ type SnapshotOps interface {
 	ValidateSnapshotData(name string, retry bool, timeout, retryInterval time.Duration) error
 }
 
+// GroupSnapshotOps is an interface to perform k8s GroupVolumeSnapshot operations
+type GroupSnapshotOps interface {
+	// GetGroupSnapshot returns the group snapshot for the given name and namespace
+	GetGroupSnapshot(name, namespace string) (*v1alpha1.GroupVolumeSnapshot, error)
+	// ListGroupSnapshots lists all group snapshots for the given namespace
+	ListGroupSnapshots(namespace string) (*v1alpha1.GroupVolumeSnapshotList, error)
+	// CreateGroupSnapshot creates the given group snapshot
+	CreateGroupSnapshot(*v1alpha1.GroupVolumeSnapshot) (*v1alpha1.GroupVolumeSnapshot, error)
+	// UpdateGroupSnapshot updates the given group snapshot
+	UpdateGroupSnapshot(*v1alpha1.GroupVolumeSnapshot) (*v1alpha1.GroupVolumeSnapshot, error)
+	// DeleteGroupSnapshot deletes the group snapshot with the given name and namespace
+	DeleteGroupSnapshot(name, namespace string) error
+	// ValidateGroupSnapshot checks if the group snapshot with given name and namespace is in ready state
+	//  If retry is true, the validation will be retried with given timeout and retry internal
+	ValidateGroupSnapshot(name, namespace string, retry bool, timeout, retryInterval time.Duration) error
+	// GetSnapshotsForGroupSnapshot returns all child snapshots for the group snapshot
+	GetSnapshotsForGroupSnapshot(name, namespace string) ([]*snap_v1.VolumeSnapshot, error)
+}
+
 // RuleOps is an interface to perform operations for k8s stork rule
 type RuleOps interface {
 	// GetRule fetches the given stork rule
@@ -466,6 +489,20 @@ type ObjectOps interface {
 	UpdateObject(object runtime.Object) (runtime.Object, error)
 }
 
+// VolumePlacementStrategyOps is an interface to perform CRUD volume placememt strategy ops
+type VolumePlacementStrategyOps interface {
+	// CreateVolumePlacementStrategy creates a new volume placement strategy
+	CreateVolumePlacementStrategy(spec *talisman_v1beta1.VolumePlacementStrategy) (*talisman_v1beta1.VolumePlacementStrategy, error)
+	// UpdateVolumePlacementStrategy updates an existing volume placement strategy
+	UpdateVolumePlacementStrategy(spec *talisman_v1beta1.VolumePlacementStrategy) (*talisman_v1beta1.VolumePlacementStrategy, error)
+	// ListVolumePlacementStrategies lists all volume placement strategies
+	ListVolumePlacementStrategies() (*talisman_v1beta1.VolumePlacementStrategyList, error)
+	// DeleteVolumePlacementStrategy deletes the volume placement strategy with given name
+	DeleteVolumePlacementStrategy(name string) error
+	// GetVolumePlacementStrategy returns the volume placememt strategy with given name
+	GetVolumePlacementStrategy(name string) (*talisman_v1beta1.VolumePlacementStrategy, error)
+}
+
 type privateMethods interface {
 	initK8sClient() error
 }
@@ -503,6 +540,7 @@ type k8sOps struct {
 	client             kubernetes.Interface
 	snapClient         rest.Interface
 	storkClient        storkclientset.Interface
+	talismanClient     talismanclientset.Interface
 	apiExtensionClient apiextensionsclient.Interface
 	config             *rest.Config
 	dynamicInterface   dynamic.Interface
@@ -1614,7 +1652,7 @@ func (k *k8sOps) ValidateStatefulSet(statefulset *apps_api.StatefulSet, timeout 
 			return "", true, err
 		}
 
-		pods, err := k.GetStatefulSetPods(statefulset)
+		pods, err := k.GetStatefulSetPods(sset)
 		if err != nil || pods == nil {
 			return "", true, &ErrAppNotReady{
 				ID:    sset.Name,
@@ -2679,6 +2717,121 @@ func (k *k8sOps) DeleteSnapshotData(name string) error {
 
 // Snapshot APIs - END
 
+// GroupSnapshot APIs - BEGIN
+
+func (k *k8sOps) GetGroupSnapshot(name, namespace string) (*v1alpha1.GroupVolumeSnapshot, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().GroupVolumeSnapshots(namespace).Get(name, meta_v1.GetOptions{})
+}
+
+func (k *k8sOps) ListGroupSnapshots(namespace string) (*v1alpha1.GroupVolumeSnapshotList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().GroupVolumeSnapshots(namespace).List(meta_v1.ListOptions{})
+}
+
+func (k *k8sOps) CreateGroupSnapshot(snap *v1alpha1.GroupVolumeSnapshot) (*v1alpha1.GroupVolumeSnapshot, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().GroupVolumeSnapshots(snap.Namespace).Create(snap)
+}
+
+func (k *k8sOps) UpdateGroupSnapshot(snap *v1alpha1.GroupVolumeSnapshot) (*v1alpha1.GroupVolumeSnapshot, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.storkClient.Stork().GroupVolumeSnapshots(snap.Namespace).Update(snap)
+}
+
+func (k *k8sOps) DeleteGroupSnapshot(name, namespace string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.storkClient.Stork().GroupVolumeSnapshots(namespace).Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) ValidateGroupSnapshot(name, namespace string, retry bool, timeout, retryInterval time.Duration) error {
+	t := func() (interface{}, bool, error) {
+		snap, err := k.GetGroupSnapshot(name, namespace)
+		if err != nil {
+			return "", true, err
+		}
+
+		if len(snap.Status.VolumeSnapshots) == 0 {
+			return "", true, &ErrSnapshotNotReady{
+				ID:    name,
+				Cause: fmt.Sprintf("group snapshot has 0 child snapshots yet"),
+			}
+		}
+
+		if snap.Status.Stage == v1alpha1.GroupSnapshotStageFinal {
+			if snap.Status.Status == v1alpha1.GroupSnapshotSuccessful {
+				return "", false, nil
+			}
+
+			if snap.Status.Status == v1alpha1.GroupSnapshotFailed {
+				return "", false, &ErrSnapshotFailed{
+					ID:    name,
+					Cause: fmt.Sprintf("group snapshot is in failed state"),
+				}
+			}
+		}
+
+		return "", true, &ErrSnapshotNotReady{
+			ID:    name,
+			Cause: fmt.Sprintf("stage: %s status: %s", snap.Status.Stage, snap.Status.Status),
+		}
+	}
+
+	if retry {
+		if _, err := task.DoRetryWithTimeout(t, timeout, retryInterval); err != nil {
+			return err
+		}
+	} else {
+		if _, _, err := t(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (k *k8sOps) GetSnapshotsForGroupSnapshot(name, namespace string) ([]*snap_v1.VolumeSnapshot, error) {
+	snap, err := k.GetGroupSnapshot(name, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(snap.Status.VolumeSnapshots) == 0 {
+		return nil, fmt.Errorf("group snapshot: [%s] %s does not have any volume snapshots", namespace, name)
+	}
+
+	snapshots := make([]*snap_v1.VolumeSnapshot, 0)
+	for _, snapStatus := range snap.Status.VolumeSnapshots {
+		snap, err := k.GetSnapshot(snapStatus.VolumeSnapshotName, namespace)
+		if err != nil {
+			return nil, err
+		}
+
+		snapshots = append(snapshots, snap)
+	}
+
+	return snapshots, nil
+}
+
+// GroupSnapshot APIs - END
+
 // Rule APIs - BEGIN
 func (k *k8sOps) GetRule(name, namespace string) (*v1alpha1.Rule, error) {
 	if err := k.initK8sClient(); err != nil {
@@ -3065,6 +3218,47 @@ func (k *k8sOps) ValidateCRD(resource CustomResource, timeout, retryInterval tim
 	})
 }
 
+func (k *k8sOps) CreateVolumePlacementStrategy(spec *talisman_v1beta1.VolumePlacementStrategy) (*talisman_v1beta1.VolumePlacementStrategy, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.talismanClient.Portworx().VolumePlacementStrategies().Create(spec)
+}
+
+func (k *k8sOps) UpdateVolumePlacementStrategy(spec *talisman_v1beta1.VolumePlacementStrategy) (*talisman_v1beta1.VolumePlacementStrategy, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.talismanClient.Portworx().VolumePlacementStrategies().Update(spec)
+}
+
+func (k *k8sOps) ListVolumePlacementStrategies() (*talisman_v1beta1.VolumePlacementStrategyList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+	return k.talismanClient.Portworx().VolumePlacementStrategies().List(meta_v1.ListOptions{})
+}
+
+func (k *k8sOps) DeleteVolumePlacementStrategy(name string) error {
+	if err := k.initK8sClient(); err != nil {
+		return err
+	}
+
+	return k.talismanClient.Portworx().VolumePlacementStrategies().Delete(name, &meta_v1.DeleteOptions{
+		PropagationPolicy: &deleteForegroundPolicy,
+	})
+}
+
+func (k *k8sOps) GetVolumePlacementStrategy(name string) (*talisman_v1beta1.VolumePlacementStrategy, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.talismanClient.Portworx().VolumePlacementStrategies().Get(name, meta_v1.GetOptions{})
+}
+
 // CRD APIs - END
 
 // Object APIs - BEGIN
@@ -3184,6 +3378,11 @@ func (k *k8sOps) loadClientFor(config *rest.Config) error {
 	}
 
 	k.storkClient, err = storkclientset.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	k.talismanClient, err = talismanclientset.NewForConfig(config)
 	if err != nil {
 		return err
 	}

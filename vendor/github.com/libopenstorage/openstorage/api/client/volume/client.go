@@ -263,6 +263,25 @@ func (v *volumeClient) GetActiveRequests() (*api.ActiveRequests, error) {
 	return requests, nil
 }
 
+// CapacityUsage returns exclusive and shared capacity
+// usage of a snapshot/volume
+func (v *volumeClient) CapacityUsage(
+	ID string,
+) (*api.CapacityUsageResponse, error) {
+	requests := &api.CapacityUsageResponse{}
+	resp := v.c.Get().Resource(volumePath + "/usage").Instance(ID).Do()
+
+	if resp.Error() != nil {
+		return nil, resp.FormatError()
+	}
+
+	if err := resp.Unmarshal(requests); err != nil {
+		return nil, err
+	}
+
+	return requests, nil
+}
+
 // Shutdown and cleanup.
 func (v *volumeClient) Shutdown() {}
 
@@ -486,6 +505,9 @@ func (v *volumeClient) CredsValidate(uuid string) error {
 	req := v.c.Put().Resource(api.OsdCredsPath + "/validate").Instance(uuid)
 	response := req.Do()
 	if response.Error() != nil {
+		if response.StatusCode() == http.StatusUnprocessableEntity {
+			return volume.NewCredentialError(response.Error().Error())
+		}
 		return response.FormatError()
 	}
 	return nil
@@ -763,9 +785,9 @@ func (v *volumeClient) CloudMigrateCancel(request *api.CloudMigrateCancelRequest
 	return nil
 }
 
-func (v *volumeClient) CloudMigrateStatus() (*api.CloudMigrateStatusResponse, error) {
+func (v *volumeClient) CloudMigrateStatus(request *api.CloudMigrateStatusRequest) (*api.CloudMigrateStatusResponse, error) {
 	statusResponse := &api.CloudMigrateStatusResponse{}
-	req := v.c.Get().Resource(api.OsdMigrateStatusPath)
+	req := v.c.Get().Resource(api.OsdMigrateStatusPath).Body(request)
 	response := req.Do()
 	if response.Error() != nil {
 		return nil, response.FormatError()
