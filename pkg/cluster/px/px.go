@@ -595,6 +595,11 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 				Resources: []string{"persistentvolumeclaims", "persistentvolumes"},
 				Verbs:     []string{"get", "list"},
 			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"configmaps"},
+				Verbs:     []string{"get", "update", "list", "create"},
+			},
 		},
 	}
 
