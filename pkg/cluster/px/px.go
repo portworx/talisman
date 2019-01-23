@@ -216,7 +216,6 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 	}
 
 	newOCIMonVer := fmt.Sprintf("%s:%s", newSpec.Spec.OCIMonImage, newSpec.Spec.OCIMonTag)
-	newPXVer := fmt.Sprintf("%s:%s", newSpec.Spec.PXImage, newSpec.Spec.PXTag)
 
 	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec, clusterManager)
 	if err != nil {
@@ -245,14 +244,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 		return err
 	}
 
-	// 1. Start DaemonSet to download the new PX and OCI-mon image and validate it completes
-	if err := ops.runDockerPuller(newOCIMonVer); err != nil {
-		return err
-	}
-
-	if err := ops.runDockerPuller(newPXVer); err != nil {
-		return err
-	}
+	// NOTE: Skip step 1. with ops.runDockerPuller(newOCIMonVer, newPXVer) as it doesn't handle private registries, air gapped installs and containerd
 
 	// 2. (Optional) Scale down px shared applications to 0 replicas if required based on opts
 	if ops.isScaleDownOfSharedAppsRequired(isAppDrainNeeded, opts) {
