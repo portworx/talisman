@@ -969,6 +969,11 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		return err
 	}
 
+	err = ops.k8sOps.DeleteNamespace(pxSecretsNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
 	return nil
 }
 
