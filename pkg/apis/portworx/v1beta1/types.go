@@ -226,7 +226,10 @@ type LabelSelectorRequirement struct {
 	Operator LabelSelectorOperator `json:"operator"`
 	// values is an array of string values. If the operator is In or NotIn,
 	// the values array must be non-empty. If the operator is Exists or DoesNotExist,
-	// the values array must be empty. This array is replaced during a strategic
+	// the values array must be empty. For Gt and Lt, the key must be greater than
+	// and less than all values respectively
+	//
+	// This array is replaced during a strategic
 	// merge patch.
 	// +optional
 	Values []string `json:"values"`
