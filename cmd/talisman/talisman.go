@@ -25,6 +25,8 @@ var (
 	newPXTag             string
 	newOCIMonImage       string
 	newOCIMonTag         string
+	wiperImage           string
+	wiperTag             string
 	op                   string
 	dockerRegistrySecret string
 	kubeconfig           string
@@ -102,6 +104,8 @@ func doDelete() {
 
 	opts := &px.DeleteOptions{
 		WipeCluster: wipeCluster,
+		WiperImage:  wiperImage,
+		WiperTag:    wiperTag,
 	}
 
 	err = inst.Delete(nil, opts)
@@ -127,4 +131,6 @@ func init() {
 			px.SharedAppsScaleDownAuto, px.SharedAppsScaleDownOn, px.SharedAppsScaleDownOff))
 	flag.BoolVar(&wipeCluster, "wipecluster", false, "(optional) If given, all Portworx metadata will be removed from the cluster. "+
 		"This means all the data will be wiped off from the cluster and cannot be recovered")
+	flag.StringVar(&wiperImage, "wiperimage", "", "Node wiper image to use for the upgrade")
+	flag.StringVar(&wiperTag, "wipertag", "", "Node wiper tag to use for the upgrade")
 }
