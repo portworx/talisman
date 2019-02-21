@@ -79,8 +79,15 @@ fi
 
 
 # Remove systemd service (if any)
+
+run_with_nsenter "systemctl stop portworx" true
+run_with_nsenter "systemctl disable portworx" true
+
+# the nsenter approach above doesn't seem to work on coreos machines. To cover all scenarios,
+# try systemctl directly and ignore if it fails. This works on coreos.
 systemctl stop portworx || true
 systemctl disable portworx || true
+
 rm -rf /etc/systemd/system/*portworx*
 
 # unmount oci
