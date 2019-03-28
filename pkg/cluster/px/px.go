@@ -92,6 +92,8 @@ const (
 	pxRoleName                      = "px-role"
 	pxRoleBindingName               = "px-role-binding"
 	pxServiceAccountName            = "px-account"
+	pxAPIDaemonset                  = "portworx-api"
+	pxAPIServiceName                = "portworx-api"
 	lhRoleName                      = "px-lh-role"
 	lhRoleBindingName               = "px-lh-role-binding"
 	lhServiceAccountName            = "px-lh-account"
@@ -862,6 +864,12 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
+	// Delete portworx-api daemonset
+	err = ops.k8sOps.DeleteDaemonSet(pxAPIDaemonset, pxDefaultNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
 	depNames := [4]string{
 		storkControllerName,
 		storkSchedulerName,
@@ -943,8 +951,9 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	services := [3]string{
+	services := [4]string{
 		pxServiceName,
+		pxAPIServiceName,
 		storkServiceName,
 		lhServiceName,
 	}
