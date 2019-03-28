@@ -92,6 +92,8 @@ const (
 	pxRoleName                      = "px-role"
 	pxRoleBindingName               = "px-role-binding"
 	pxServiceAccountName            = "px-account"
+	pxAPIDaemonset                  = "portworx-api"
+	pxAPIServiceName                = "portworx-api"
 	lhRoleName                      = "px-lh-role"
 	lhRoleBindingName               = "px-lh-role-binding"
 	lhServiceAccountName            = "px-lh-account"
@@ -117,6 +119,11 @@ const (
 	storkSchedulerServiceAccount    = "stork-scheduler-account"
 	storkSchedulerName              = "stork-scheduler"
 	storkSnapshotStorageClass       = "stork-snapshot-sc"
+	csiClusterRoleBinding           = "px-csi-role-binding"
+	csiService                      = "px-csi-service"
+	csiAccount                      = "px-csi-account"
+	csiClusterRole                  = "px-csi-role"
+	csiStatefulSet                  = "px-csi-ext"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
 )
@@ -862,7 +869,13 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	depNames := [4]string{
+	// Delete portworx-api daemonset
+	err = ops.k8sOps.DeleteDaemonSet(pxAPIDaemonset, pxDefaultNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	depNames := []string{
 		storkControllerName,
 		storkSchedulerName,
 		pvcControllerName,
@@ -875,7 +888,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	roles := [2][2]string{
+	roles := [][]string{
 		{pxRoleName, pxSecretsNamespace},
 		{lhRoleName, pxDefaultNamespace},
 	}
@@ -903,11 +916,12 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		return err
 	}
 
-	clusterRoles := [4]string{
+	clusterRoles := []string{
 		pxClusterRoleName,
 		storkControllerClusterRole,
 		storkSchedulerClusterRole,
 		pvcControllerClusterRole,
+		csiClusterRole,
 	}
 	for _, role := range clusterRoles {
 		err = ops.k8sOps.DeleteClusterRole(role)
@@ -916,11 +930,12 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	clusterRoleBindings := [4]string{
+	clusterRoleBindings := []string{
 		pxClusterRoleBindingName,
 		storkControllerClusterBinding,
 		storkSchedulerCluserBinding,
 		pvcControllerClusterRoleBinding,
+		csiClusterRoleBinding,
 	}
 	for _, binding := range clusterRoleBindings {
 		err = ops.k8sOps.DeleteClusterRoleBinding(binding)
@@ -929,12 +944,13 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	accounts := [5]string{
+	accounts := []string{
 		pxServiceAccountName,
 		lhServiceAccountName,
 		storkControllerServiceAccount,
 		storkSchedulerServiceAccount,
 		pvcControllerServiceAccount,
+		csiAccount,
 	}
 	for _, acc := range accounts {
 		err = ops.k8sOps.DeleteServiceAccount(acc, pxDefaultNamespace)
@@ -943,10 +959,12 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	services := [3]string{
+	services := []string{
 		pxServiceName,
+		pxAPIServiceName,
 		storkServiceName,
 		lhServiceName,
+		csiService,
 	}
 	for _, svc := range services {
 		err = ops.k8sOps.DeleteService(svc, pxDefaultNamespace)
@@ -955,8 +973,19 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
+	statefulSets := []string{
+		csiStatefulSet,
+	}
+
+	for _, ss := range statefulSets {
+		err = ops.k8sOps.DeleteStatefulSet(ss, pxDefaultNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
 	strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
-	configMaps := [4]string{
+	configMaps := []string{
 		lhConfigMap,
 		storkControllerConfigMap,
 		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
