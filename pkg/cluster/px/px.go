@@ -192,7 +192,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	}
 
 	var installedNamespace string
-OUTER:
+outer:
 	for _, ns := range namespaces.Items {
 		dss, err := k8sOps.ListDaemonSets(ns.ObjectMeta.Name, pxListOpts)
 		if err != nil {
@@ -203,7 +203,7 @@ OUTER:
 			for _, c := range ds.Spec.Template.Spec.Containers {
 				if isPXOCIImage(c.Image) || isPXEnterpriseImage(c.Image) {
 					installedNamespace = ns.Name
-					break OUTER
+					break outer
 				}
 			}
 		}
