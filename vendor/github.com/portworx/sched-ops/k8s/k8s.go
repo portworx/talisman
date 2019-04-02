@@ -105,6 +105,8 @@ type EventOps interface {
 type NamespaceOps interface {
 	// GetNamespace returns a namespace object for given name
 	GetNamespace(name string) (*v1.Namespace, error)
+	// ListNamespaces lists all namespaces
+	ListNamespaces() (*v1.NamespaceList, error)
 	// CreateNamespace creates a namespace with given name and metadata
 	CreateNamespace(name string, metadata map[string]string) (*v1.Namespace, error)
 	// DeleteNamespace deletes a namespace with given name
@@ -620,6 +622,14 @@ func (k *k8sOps) GetNamespace(name string) (*v1.Namespace, error) {
 	}
 
 	return k.client.CoreV1().Namespaces().Get(name, meta_v1.GetOptions{})
+}
+
+func (k *k8sOps) ListNamespaces() (*v1.NamespaceList, error) {
+	if err := k.initK8sClient(); err != nil {
+		return nil, err
+	}
+
+	return k.client.CoreV1().Namespaces().List(meta_v1.ListOptions{})
 }
 
 func (k *k8sOps) CreateNamespace(name string, metadata map[string]string) (*v1.Namespace, error) {
