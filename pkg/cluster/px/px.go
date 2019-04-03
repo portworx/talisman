@@ -99,6 +99,7 @@ const (
 	lhConfigMap                     = "px-lighthouse-config"
 	lhServiceName                   = "px-lighthouse"
 	lhDeploymentName                = "px-lighthouse"
+	bootstrapCloudDriveNamespace    = "kube-system"
 	internalEtcdConfigMapPrefix     = "px-bootstrap-"
 	cloudDriveConfigMapPrefix       = "px-cloud-drive-"
 	pvcControllerClusterRole        = "portworx-pvc-controller-role"
@@ -867,6 +868,8 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
+	strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
+
 	dss, err := ops.getPXDaemonsets()
 	if err != nil {
 		return err
@@ -924,6 +927,17 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	err = ops.k8sOps.DeleteNamespace(pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
+	}
+
+	configMaps := []string{
+		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
+		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
+	}
+	for _, cm := range configMaps {
+		err = ops.k8sOps.DeleteConfigMap(cm, bootstrapCloudDriveNamespace)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
 	}
 
 	// Delete other components from all installedNamespaces
@@ -1009,10 +1023,11 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			}
 		}
 
-		strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
-		configMaps := []string{
+		configMaps = []string{
 			lhConfigMap,
 			storkControllerConfigMap,
+			// below 2 are currently only in the kube-system namespace. keeping them here
+			// in case the behavior changes
 			fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
 			fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 		}
