@@ -29,8 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-type pxInstallType string
-
 var (
 	errUsingInternalEtcd = fmt.Errorf("cluster is using internal etcd")
 	configMapNameRegex   = regexp.MustCompile("[^a-zA-Z0-9]+")
@@ -42,20 +40,17 @@ var (
 )
 
 const (
-	pxInstallTypeOCI       pxInstallType = "oci"
-	pxInstallTypeDocker    pxInstallType = "docker"
-	pxInstallTypeNone      pxInstallType = "none"
-	changeCauseAnnotation                = "kubernetes.io/change-cause"
-	pxEnableLabelKey                     = "px/enabled"
-	dsOptPwxVolumeName                   = "optpwx"
-	dsEtcPwxVolumeName                   = "etcpwx"
-	dsDbusVolumeName                     = "dbus"
-	dsSysdVolumeName                     = "sysdmount"
-	sysdmount                            = "/etc/systemd/system"
-	dbusPath                             = "/var/run/dbus"
-	pksPersistentStoreRoot               = "/var/vcap/store"
-	pxOptPwx                             = "/opt/pwx"
-	pxEtcdPwx                            = "/etc/pwx"
+	changeCauseAnnotation  = "kubernetes.io/change-cause"
+	pxEnableLabelKey       = "px/enabled"
+	dsOptPwxVolumeName     = "optpwx"
+	dsEtcPwxVolumeName     = "etcpwx"
+	dsDbusVolumeName       = "dbus"
+	dsSysdVolumeName       = "sysdmount"
+	sysdmount              = "/etc/systemd/system"
+	dbusPath               = "/var/run/dbus"
+	pksPersistentStoreRoot = "/var/vcap/store"
+	pxOptPwx               = "/opt/pwx"
+	pxEtcdPwx              = "/etc/pwx"
 )
 
 type platformType string
@@ -78,9 +73,7 @@ const (
 )
 
 var (
-	pxVersionRegex         = regexp.MustCompile(`^(\d+\.\d+\.\d+).*`)
-	ociMonImageRegex       = regexp.MustCompile(`.*registry.connect.redhat.com/portworx/(px-enterprise|px-monitor).+|.+oci-monitor.+`)
-	pxEnterpriseImageRegex = regexp.MustCompile(".+px-enterprise.+")
+	pxVersionRegex = regexp.MustCompile(`^(\d+\.\d+\.\d+).*`)
 )
 
 const (
@@ -97,6 +90,7 @@ const (
 	pxRoleName                      = "px-role"
 	pxRoleBindingName               = "px-role-binding"
 	pxServiceAccountName            = "px-account"
+	pxDaemonsetContainerName        = "portworx"
 	pxAPIDaemonset                  = "portworx-api"
 	pxAPIServiceName                = "portworx-api"
 	lhRoleName                      = "px-lh-role"
@@ -138,7 +132,7 @@ type pxClusterOps struct {
 	utils                *k8sutils.Instance
 	dockerRegistrySecret string
 	platform             platformType
-	installedNamespace   string
+	installedNamespaces  []string
 }
 
 // timeouts and intervals
@@ -191,25 +185,19 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 		return nil, err
 	}
 
-	var installedNamespace string
-outer:
+	installedNamespaces := make([]string, 0)
 	for _, ns := range namespaces.Items {
 		dss, err := k8sOps.ListDaemonSets(ns.ObjectMeta.Name, pxListOpts)
 		if err != nil {
 			return nil, err
 		}
 
-		for _, ds := range dss {
-			for _, c := range ds.Spec.Template.Spec.Containers {
-				if isPXOCIImage(c.Image) || isPXEnterpriseImage(c.Image) {
-					installedNamespace = ns.Name
-					break outer
-				}
-			}
+		if len(dss) > 0 {
+			installedNamespaces = append(installedNamespaces, ns.ObjectMeta.Name)
 		}
 	}
 
-	if len(installedNamespace) == 0 {
+	if len(installedNamespaces) == 0 {
 		return nil, errNoPXDaemonset
 	}
 
@@ -217,7 +205,7 @@ outer:
 		k8sOps:               k8sOps,
 		dockerRegistrySecret: dockerRegistrySecret,
 		utils:                utils,
-		installedNamespace:   installedNamespace,
+		installedNamespaces:  installedNamespaces,
 	}, nil
 }
 
@@ -236,7 +224,18 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 		return fmt.Errorf("new cluster spec is required for the upgrade call")
 	}
 
-	svc, err := ops.k8sOps.GetService(pxServiceName, ops.installedNamespace)
+	if len(ops.installedNamespaces) == 0 {
+		return errNoPXDaemonset
+	}
+
+	if len(ops.installedNamespaces) > 1 {
+		return fmt.Errorf("Found Portworx installed in more than one namespace: %s."+
+			" Portworx is supported only in one namespace per cluster. "+
+			" Delete Portworx specs from all but one namespace and retry.", ops.installedNamespaces)
+	}
+
+	ns := ops.installedNamespaces[0]
+	svc, err := ops.k8sOps.GetService(pxServiceName, ns)
 	if err != nil {
 		return err
 	}
@@ -444,31 +443,21 @@ func getPXDriver(ip string) (volume.VolumeDriver, cluster.Cluster, error) {
 	return volDriver, clusterManager, nil
 }
 
-// getPXDaemonsets return PX daemonsets in the cluster based on given installer type
-func (ops *pxClusterOps) getPXDaemonsets(installType pxInstallType) ([]apps_api.DaemonSet, error) {
-	dss, err := ops.k8sOps.ListDaemonSets(ops.installedNamespace, pxListOpts)
-	if err != nil {
-		return nil, err
-	}
+// getPXDaemonsets return PX daemonsets in the cluster
+func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
+	pxDaemonsets := make([]apps_api.DaemonSet, 0)
+	for _, ns := range ops.installedNamespaces {
+		dss, err := ops.k8sOps.ListDaemonSets(ns, pxListOpts)
+		if err != nil {
+			return nil, err
+		}
 
-	var ociList, dockerList []apps_api.DaemonSet
-	for _, ds := range dss {
-		for _, c := range ds.Spec.Template.Spec.Containers {
-			if isPXOCIImage(c.Image) {
-				ociList = append(ociList, ds)
-				break
-			} else if isPXEnterpriseImage(c.Image) {
-				dockerList = append(dockerList, ds)
-				break
-			}
+		if len(dss) > 0 {
+			pxDaemonsets = append(pxDaemonsets, dss...)
 		}
 	}
 
-	if installType == pxInstallTypeDocker {
-		return dockerList, nil
-	}
-
-	return ociList, nil
+	return pxDaemonsets, nil
 }
 
 // upgradePX upgrades PX daemonsets and waits till all replicas are ready
@@ -525,13 +514,13 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	expectedGenerations := make(map[types.UID]int64)
 
 	t := func() (interface{}, bool, error) {
-		dss, err = ops.getPXDaemonsets(pxInstallTypeOCI)
+		dss, err = ops.getPXDaemonsets()
 		if err != nil {
 			return nil, true, err
 		}
 
 		if len(dss) == 0 {
-			return nil, true, fmt.Errorf("did not find any PX daemonsets for install type: %s", pxInstallTypeOCI)
+			return nil, true, errNoPXDaemonset
 		}
 
 		for _, ds := range dss {
@@ -540,7 +529,7 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			dsCopy := ds.DeepCopy()
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
-				if isPXOCIImage(c.Image) {
+				if c.Name == pxDaemonsetContainerName {
 					if c.Image == newVersion {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, newVersion)
@@ -653,7 +642,7 @@ func (ops *pxClusterOps) updatePxSecretsPermissions() error {
 			{
 				Kind:      "ServiceAccount",
 				Name:      pxServiceAccountName,
-				Namespace: ops.installedNamespace,
+				Namespace: ops.installedNamespaces[0],
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
@@ -743,27 +732,18 @@ func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1beta1.Cluster, clu
 }
 
 func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
-	dss, err := ops.getPXDaemonsets(pxInstallTypeDocker)
-	if err != nil {
-		return err
-	}
-
-	if len(dss) > 0 {
-		return fmt.Errorf("pre-flight check failed as found: %d PX DaemonSet(s) of type docker. Only upgrading from OCI is supported", len(dss))
-	}
-
 	if len(spec.Spec.OCIMonTag) == 0 {
 		return fmt.Errorf("pre-flight check failed as new version of Portworx OCI monitor not given to upgrade API")
 	}
 
 	// check if PX is not ready in any of the nodes
-	dss, err = ops.getPXDaemonsets(pxInstallTypeOCI)
+	dss, err := ops.getPXDaemonsets()
 	if err != nil {
 		return err
 	}
 
 	if len(dss) == 0 {
-		return fmt.Errorf("pre-flight check failed as it did not find any PX daemonsets for install type: %s", pxInstallTypeOCI)
+		return errNoPXDaemonset
 	}
 
 	for _, d := range dss {
@@ -805,7 +785,7 @@ func (ops *pxClusterOps) wipePXKvdb(endpoints []string, opts map[string]string, 
 }
 
 func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string, string, platformType, error) {
-	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
+	dss, err := ops.getPXDaemonsets()
 	if err != nil {
 		return nil, nil, "", platformTypeDefault, err
 	}
@@ -832,7 +812,7 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 	}
 
 	for _, c := range ds.Spec.Template.Spec.Containers {
-		if isPXOCIImage(c.Image) || isPXEnterpriseImage(c.Image) {
+		if c.Name == pxDaemonsetContainerName {
 			for i, arg := range c.Args {
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
@@ -887,66 +867,19 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
-	logrus.Infof("Deleting all PX Kubernetes components from the cluster in %s namespace",
-		ops.installedNamespace)
-
-	dss, err := ops.getPXDaemonsets(pxInstallTypeOCI)
+	dss, err := ops.getPXDaemonsets()
 	if err != nil {
 		return err
 	}
+
+	logrus.Infof("Deleting all PX Kubernetes components from the cluster in namespaces: %s",
+		ops.installedNamespaces)
 
 	for _, ds := range dss {
 		err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
 		if err != nil {
 			return err
 		}
-	}
-
-	// Delete portworx-api daemonset
-	err = ops.k8sOps.DeleteDaemonSet(pxAPIDaemonset, ops.installedNamespace)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	depNames := []string{
-		storkControllerName,
-		storkSchedulerName,
-		pvcControllerName,
-		lhDeploymentName,
-	}
-	for _, depName := range depNames {
-		err = ops.k8sOps.DeleteDeployment(depName, ops.installedNamespace)
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	roles := [][]string{
-		{pxRoleName, pxSecretsNamespace},
-		{lhRoleName, ops.installedNamespace},
-	}
-	for _, role := range roles {
-		err = ops.k8sOps.DeleteRole(role[0], role[1])
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	roleBindings := [2][2]string{
-		{pxRoleBindingName, pxSecretsNamespace},
-		{lhRoleBindingName, ops.installedNamespace},
-	}
-	for _, binding := range roleBindings {
-		err = ops.k8sOps.DeleteRoleBinding(binding[0], binding[1])
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	clusterWideSecret := strings.Replace(clusterName+"_px_secret", "_", "-", -1)
-	err = ops.k8sOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
 	}
 
 	clusterRoles := []string{
@@ -977,58 +910,10 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 	}
 
-	accounts := []string{
-		pxServiceAccountName,
-		lhServiceAccountName,
-		storkControllerServiceAccount,
-		storkSchedulerServiceAccount,
-		pvcControllerServiceAccount,
-		csiAccount,
-	}
-	for _, acc := range accounts {
-		err = ops.k8sOps.DeleteServiceAccount(acc, ops.installedNamespace)
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	services := []string{
-		pxServiceName,
-		pxAPIServiceName,
-		storkServiceName,
-		lhServiceName,
-		csiService,
-	}
-	for _, svc := range services {
-		err = ops.k8sOps.DeleteService(svc, ops.installedNamespace)
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	statefulSets := []string{
-		csiStatefulSet,
-	}
-
-	for _, ss := range statefulSets {
-		err = ops.k8sOps.DeleteStatefulSet(ss, ops.installedNamespace)
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
-	configMaps := []string{
-		lhConfigMap,
-		storkControllerConfigMap,
-		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
-		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
-	}
-	for _, cm := range configMaps {
-		err = ops.k8sOps.DeleteConfigMap(cm, ops.installedNamespace)
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
+	clusterWideSecret := strings.Replace(clusterName+"_px_secret", "_", "-", -1)
+	err = ops.k8sOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
 	}
 
 	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
@@ -1039,6 +924,104 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	err = ops.k8sOps.DeleteNamespace(pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
+	}
+
+	// Delete other components from all installedNamespaces
+	for _, ns := range ops.installedNamespaces {
+
+		// Delete portworx-api daemonset
+		err = ops.k8sOps.DeleteDaemonSet(pxAPIDaemonset, ns)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+		depNames := []string{
+			storkControllerName,
+			storkSchedulerName,
+			pvcControllerName,
+			lhDeploymentName,
+		}
+		for _, depName := range depNames {
+			err = ops.k8sOps.DeleteDeployment(depName, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		roles := [][]string{
+			{pxRoleName, pxSecretsNamespace},
+			{lhRoleName, ns},
+		}
+		for _, role := range roles {
+			err = ops.k8sOps.DeleteRole(role[0], role[1])
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		roleBindings := [2][2]string{
+			{pxRoleBindingName, pxSecretsNamespace},
+			{lhRoleBindingName, ns},
+		}
+		for _, binding := range roleBindings {
+			err = ops.k8sOps.DeleteRoleBinding(binding[0], binding[1])
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		accounts := []string{
+			pxServiceAccountName,
+			lhServiceAccountName,
+			storkControllerServiceAccount,
+			storkSchedulerServiceAccount,
+			pvcControllerServiceAccount,
+			csiAccount,
+		}
+		for _, acc := range accounts {
+			err = ops.k8sOps.DeleteServiceAccount(acc, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		services := []string{
+			pxServiceName,
+			pxAPIServiceName,
+			storkServiceName,
+			lhServiceName,
+			csiService,
+		}
+		for _, svc := range services {
+			err = ops.k8sOps.DeleteService(svc, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		statefulSets := []string{
+			csiStatefulSet,
+		}
+
+		for _, ss := range statefulSets {
+			err = ops.k8sOps.DeleteStatefulSet(ss, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
+		configMaps := []string{
+			lhConfigMap,
+			storkControllerConfigMap,
+			fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
+			fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
+		}
+		for _, cm := range configMaps {
+			err = ops.k8sOps.DeleteConfigMap(cm, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -1294,18 +1277,4 @@ func parsePXVersion(version string) (string, error) {
 	}
 
 	return matches[1], nil
-}
-
-// isPXOCIImage checks if given image name is an oci monitor image
-func isPXOCIImage(pxImageName string) bool {
-	return ociMonImageRegex.MatchString(pxImageName)
-}
-
-// isPXEnterpriseImage checks if given image name is a px enterprise image
-func isPXEnterpriseImage(pxImageName string) bool {
-	if isPXOCIImage(pxImageName) { // workaround as golang doesn't have a negative match
-		return false
-	}
-
-	return pxEnterpriseImageRegex.MatchString(pxImageName)
 }
