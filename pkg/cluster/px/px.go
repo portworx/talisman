@@ -126,6 +126,7 @@ const (
 	csiStatefulSet                  = "px-csi-ext"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
+	pxImageEnvKey                   = "PX_IMAGE"
 )
 
 type pxClusterOps struct {
@@ -512,9 +513,12 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 	var dss []apps_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
-	newVersion := spec.OCIMonTag
+	pxImage := fmt.Sprintf("%s:%s", spec.PXImage, spec.PXTag)
+	ociImage := fmt.Sprintf("%s:%s", spec.OCIMonImage, spec.OCIMonTag)
+
+	newVersion := ociImage
 	if spec.PXTag != spec.OCIMonTag {
-		newVersion = spec.PXTag
+		newVersion = pxImage
 	}
 
 	t := func() (interface{}, bool, error) {
@@ -527,9 +531,6 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			return nil, true, errNoPXDaemonset
 		}
 
-		pxImage := fmt.Sprintf("%s:%s", spec.PXImage, spec.PXTag)
-		ociImage := fmt.Sprintf("%s:%s", spec.OCIMonImage, spec.OCIMonTag)
-
 		for _, ds := range dss {
 			skip := false
 			logrus.Infof("Upgrading PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
@@ -537,24 +538,17 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == pxDaemonsetContainerName {
-					if c.Image == ociImage {
+					oldPxImage := getEnv(c.Env, pxImageEnvKey)
+					if c.Image == ociImage && oldPxImage == pxImage {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
-							ds.Namespace, ds.Name, newVersion)
+							ds.Namespace, ds.Name, ociImage)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
 						skip = true
 					} else {
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration + 1
 						c.Image = ociImage
-						if spec.OCIMonTag != spec.PXTag {
-							c.Env = setEnv(c.Env, "PX_IMAGE", pxImage)
-						}
-						if len(ops.dockerRegistrySecret) > 0 {
-							secret, err := ops.k8sOps.GetSecret(ops.dockerRegistrySecret, ds.Namespace)
-							if err != nil {
-
-							}
-							c.Env = setEnv(c.Env, "REGISTRY_USER", string(secret.Data["REGISTRY_USER"]))
-							c.Env = setEnv(c.Env, "REGISTRY_PASS", string(secret.Data["REGISTRY_PASS"]))
+						if spec.OCIMonTag != spec.PXTag && oldPxImage != pxImage {
+							c.Env = setEnv(c.Env, pxImageEnvKey, pxImage)
 						}
 						dsCopy.Annotations[changeCauseAnnotation] = fmt.Sprintf("update PX to %s", newVersion)
 					}
@@ -623,25 +617,23 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 
 // setEnv set the envVar on a given key with a given value
 func setEnv(envVars []corev1.EnvVar, key, value string) []corev1.EnvVar {
-	index := getEnvIndex(envVars, key)
-	if index > -1 {
-		envVars[index].Value = value
-	} else {
-		envVars = append(envVars, corev1.EnvVar{Name: key, Value: value})
-	}
-	return envVars
-}
-
-// getEnvIndex find the envVar with the given key
-func getEnvIndex(envVars []corev1.EnvVar, key string) int {
-	found := -1
 	for i := 0; i < len(envVars); i++ {
 		if envVars[i].Name == key {
-			found = i
-			break
+			envVars[i].Value = value
+			return envVars
 		}
 	}
-	return found
+	return append(envVars, corev1.EnvVar{Name: key, Value: value})
+}
+
+// getEnv get the envVar on a given key with a given value
+func getEnv(envVars []corev1.EnvVar, key string) string {
+	for i := 0; i < len(envVars); i++ {
+		if envVars[i].Name == key {
+			return envVars[i].Value
+		}
+	}
+	return ""
 }
 
 // updatePxSecretsPermissions will update the permissions needed by PX to access secrets
