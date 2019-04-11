@@ -126,6 +126,7 @@ const (
 	csiStatefulSet                  = "px-csi-ext"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
+	pxImageEnvKey                   = "PX_IMAGE"
 )
 
 type pxClusterOps struct {
@@ -263,8 +264,6 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 		newSpec.Spec.PXTag = newSpec.Spec.OCIMonTag
 	}
 
-	newOCIMonVer := fmt.Sprintf("%s:%s", newSpec.Spec.OCIMonImage, newSpec.Spec.OCIMonTag)
-
 	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec, clusterManager)
 	if err != nil {
 		return err
@@ -282,7 +281,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 		}
 	}
 
-	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v App drain requirement: %v", newOCIMonVer, opts, isAppDrainNeeded)
+	logrus.Infof("Upgrading px cluster to %s. Upgrade opts: %v App drain requirement: %v", newSpec.Spec.OCIMonTag, opts, isAppDrainNeeded)
 
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
 	var configParseErr error
@@ -318,7 +317,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 	}
 
 	// 3. Start rolling upgrade of PX DaemonSet
-	err = ops.upgradePX(newOCIMonVer)
+	err = ops.upgradePX(newSpec.Spec)
 	if err != nil {
 		return err
 	}
@@ -462,7 +461,7 @@ func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 }
 
 // upgradePX upgrades PX daemonsets and waits till all replicas are ready
-func (ops *pxClusterOps) upgradePX(newVersion string) error {
+func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 	var err error
 
 	// update RBAC cluster role
@@ -514,6 +513,14 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	var dss []apps_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
+	pxImage := fmt.Sprintf("%s:%s", spec.PXImage, spec.PXTag)
+	ociImage := fmt.Sprintf("%s:%s", spec.OCIMonImage, spec.OCIMonTag)
+
+	newVersion := ociImage
+	if spec.PXTag != spec.OCIMonTag {
+		newVersion = pxImage
+	}
+
 	t := func() (interface{}, bool, error) {
 		dss, err = ops.getPXDaemonsets()
 		if err != nil {
@@ -531,14 +538,18 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 			for i := 0; i < len(dsCopy.Spec.Template.Spec.Containers); i++ {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == pxDaemonsetContainerName {
-					if c.Image == newVersion {
+					oldPxImage := getEnv(c.Env, pxImageEnvKey)
+					if c.Image == ociImage && oldPxImage == pxImage {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
-							ds.Namespace, ds.Name, newVersion)
+							ds.Namespace, ds.Name, ociImage)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
 						skip = true
 					} else {
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration + 1
-						c.Image = newVersion
+						c.Image = ociImage
+						if spec.OCIMonTag != spec.PXTag && oldPxImage != pxImage {
+							c.Env = setEnv(c.Env, pxImageEnvKey, pxImage)
+						}
 						dsCopy.Annotations[changeCauseAnnotation] = fmt.Sprintf("update PX to %s", newVersion)
 					}
 					break
@@ -602,6 +613,27 @@ func (ops *pxClusterOps) upgradePX(newVersion string) error {
 	}
 
 	return nil
+}
+
+// setEnv set the envVar on a given key with a given value
+func setEnv(envVars []corev1.EnvVar, key, value string) []corev1.EnvVar {
+	for i := 0; i < len(envVars); i++ {
+		if envVars[i].Name == key {
+			envVars[i].Value = value
+			return envVars
+		}
+	}
+	return append(envVars, corev1.EnvVar{Name: key, Value: value})
+}
+
+// getEnv get the envVar on a given key with a given value
+func getEnv(envVars []corev1.EnvVar, key string) string {
+	for i := 0; i < len(envVars); i++ {
+		if envVars[i].Name == key {
+			return envVars[i].Value
+		}
+	}
+	return ""
 }
 
 // updatePxSecretsPermissions will update the permissions needed by PX to access secrets
@@ -717,7 +749,7 @@ func (ops *pxClusterOps) isUpgradeAppDrainRequired(spec *apiv1beta1.Cluster, clu
 		return false, err
 	}
 
-	newVersion, err := parsePXVersion(spec.Spec.OCIMonTag)
+	newVersion, err := parsePXVersion(spec.Spec.PXTag)
 	if err != nil {
 		return false, err
 	}
