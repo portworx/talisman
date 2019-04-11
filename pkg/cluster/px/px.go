@@ -472,6 +472,11 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
+				APIGroups: []string{""},
 				Resources: []string{"nodes"},
 				Verbs:     []string{"get", "update", "list", "watch"},
 			},
@@ -495,6 +500,11 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 				Resources:     []string{"podsecuritypolicies"},
 				ResourceNames: []string{"privileged"},
 				Verbs:         []string{"use"},
+			},
+			{
+				APIGroups: []string{"portworx.io"},
+				Resources: []string{"volumeplacementstrategies"},
+				Verbs:     []string{"get", "list"},
 			},
 		},
 	}
