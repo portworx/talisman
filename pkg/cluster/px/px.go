@@ -483,7 +483,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"pods"},
-				Verbs:     []string{"get", "list", "delete"},
+				Verbs:     []string{"get", "list", "delete", "watch", "update"},
 			},
 			{
 				APIGroups: []string{""},
