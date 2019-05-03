@@ -1098,7 +1098,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 		wiperTag = defaultNodeWiperTag
 	}
 
-	args := []string{"-w"}
+	args := []string{"-w", "-r"}
 	ds := &apps_api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pxNodeWiperDaemonSetName,
