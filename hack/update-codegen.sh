@@ -22,9 +22,11 @@ SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 CODEGEN_PKG=${CODEGEN_PKG:-$(cd ${SCRIPT_ROOT}; ls -d -1 ./vendor/k8s.io/code-generator 2>/dev/null || echo ../code-generator)}
 
 # generate the code with:
-${CODEGEN_PKG}/generate-groups.sh \
-	all \
-  github.com/portworx/talisman/pkg/client \
-	github.com/portworx/talisman/pkg/apis \
-  "portworx:v1beta1" \
-  --go-header-file ${SCRIPT_ROOT}/hack/custom-boilerplate.go.txt
+for version in "portworx:v1beta1" "portworx:v1beta2"; do
+  ${CODEGEN_PKG}/generate-groups.sh \
+	  all \
+    github.com/portworx/talisman/pkg/client \
+	  github.com/portworx/talisman/pkg/apis \
+    $version \
+    --go-header-file ${SCRIPT_ROOT}/hack/custom-boilerplate.go.txt
+done
