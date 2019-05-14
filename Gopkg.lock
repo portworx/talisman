@@ -273,7 +273,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:10da73047ebeb5c14795ab7ef7ad3c7a8941eb48a7a5845a66cf2d5e6cd6f84a"
+  digest = "1:c76d7d49a3ca3d25b813260a64c2e4a35b6d46b8c34be5f0f327bcd1b6124022"
   name = "github.com/libopenstorage/stork"
   packages = [
     "pkg/apis/stork",
@@ -283,7 +283,7 @@
     "pkg/client/clientset/versioned/typed/stork/v1alpha1",
   ]
   pruneopts = "NUT"
-  revision = "2d46472b0799caf7c0c761da0eb1edce9a335fb8"
+  revision = "f6a79a813f095495cc5787392d5f06225797bc61"
 
 [[projects]]
   digest = "1:a4df73029d2c42fabcb6b41e327d2f87e685284ec03edf76921c267d9cfc9c23"
@@ -324,6 +324,26 @@
   packages = ["."]
   pruneopts = "NUT"
   revision = "c48cc78d482608239f6c4c92a4abd87eb8761c90"
+
+[[projects]]
+  branch = "release-3.11"
+  digest = "1:b8d1c7ce1bae7d93991ad16a581440b4257dad8c83acc41851b6203c73ece3e8"
+  name = "github.com/openshift/api"
+  packages = ["apps/v1"]
+  pruneopts = "NUT"
+  revision = "8741ff068a473be041d7bafb4502c12e4f10aab5"
+
+[[projects]]
+  branch = "release-3.11"
+  digest = "1:8f8c9a60a25a3d5e5981067f438ce42ecc4217d00c6cdb7ad1067f1e563666c6"
+  name = "github.com/openshift/client-go"
+  packages = [
+    "apps/clientset/versioned",
+    "apps/clientset/versioned/scheme",
+    "apps/clientset/versioned/typed/apps/v1",
+  ]
+  pruneopts = "NUT"
+  revision = "431ec9a26e5021f35fa41ee9a89842db9bfdb370"
 
 [[projects]]
   digest = "1:bde6c3a610bd01ea7e2c8d9c7fd1116531fb6619f46f73f4f2ea16adb70da6be"
@@ -375,14 +395,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:6ca363d6e0260e1d7edd8c1684d77cfc1611e2b3ea49a5919ebdadbb5c1b6c8a"
+  digest = "1:1d6ccbea104558e06b94476b0ffe51a22cf630aa59a51861ad7ff717fd1f543b"
   name = "github.com/portworx/sched-ops"
   packages = [
     "k8s",
     "task",
   ]
   pruneopts = "NUT"
-  revision = "d64ebc777d0c67885c842bc7f03a4c131cf38bfa"
+  revision = "aa6fddd67d6ca7a5abb6b19fbd55cde27b20c1e8"
 
 [[projects]]
   digest = "1:e256b859ab89f005f2f639f5ed9807d0873d9135e27c6382f419b840ff9abe71"
