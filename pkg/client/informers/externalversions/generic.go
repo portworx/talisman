@@ -21,6 +21,7 @@ package externalversions
 import (
 	"fmt"
 
+	v1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	v1beta2 "github.com/portworx/talisman/pkg/apis/portworx/v1beta2"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
@@ -52,7 +53,13 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=portworx.io, Version=v1beta2
+	// Group=portworx.io, Version=v1beta1
+	case v1beta1.SchemeGroupVersion.WithResource("clusters"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Portworx().V1beta1().Clusters().Informer()}, nil
+	case v1beta1.SchemeGroupVersion.WithResource("volumeplacementstrategies"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Portworx().V1beta1().VolumePlacementStrategies().Informer()}, nil
+
+		// Group=portworx.io, Version=v1beta2
 	case v1beta2.SchemeGroupVersion.WithResource("volumeplacementstrategies"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Portworx().V1beta2().VolumePlacementStrategies().Informer()}, nil
 

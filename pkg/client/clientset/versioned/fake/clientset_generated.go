@@ -20,6 +20,8 @@ package fake
 
 import (
 	clientset "github.com/portworx/talisman/pkg/client/clientset/versioned"
+	portworxv1beta1 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta1"
+	fakeportworxv1beta1 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta1/fake"
 	portworxv1beta2 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta2"
 	fakeportworxv1beta2 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta2/fake"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,6 +72,11 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 }
 
 var _ clientset.Interface = &Clientset{}
+
+// PortworxV1beta1 retrieves the PortworxV1beta1Client
+func (c *Clientset) PortworxV1beta1() portworxv1beta1.PortworxV1beta1Interface {
+	return &fakeportworxv1beta1.FakePortworxV1beta1{Fake: &c.Fake}
+}
 
 // PortworxV1beta2 retrieves the PortworxV1beta2Client
 func (c *Clientset) PortworxV1beta2() portworxv1beta2.PortworxV1beta2Interface {

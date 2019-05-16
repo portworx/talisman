@@ -29,15 +29,11 @@ type VolumePlacementStrategyList struct {
 
 // VolumePlacementSpec specifies a set of rules for volume placement in the cluster
 type VolumePlacementSpec struct {
-	// Rules defines a list of rules as part of the placement spec. All the rules specified will
+	// The spec defines a list of rules as part of the placement spec. All the rules specified will
 	// be applied for volume placement.
 	// Rules that have enforcement as "required" are strictly enforced while "preferred" are best effort.
 	// In situations, where 2 or more rules conflict, the weight of the rules will dictate which wins.
-	Rules VolumePlacementRule `json:"rules"`
-}
 
-// VolumePlacementRule defines the rule for placing volume replicas
-type VolumePlacementRule struct {
 	// ReplicaAffinity defines affinity rules between replicas within a volume
 	ReplicaAffinity []*ReplicaPlacementSpec `json:"replicaAffinity,omitempty"`
 	// ReplicaAntiAffinity defines anti-affinity rules between replicas within a volume
@@ -54,7 +50,7 @@ type ReplicaPlacementSpec struct {
 	// AffectedReplicas defines the number of volume replicas affected by this rule. If not provided,
 	// rule would affect all replicas
 	// (optional)
-	AffectedReplicas int64 `json:"affected_replicas,omitempty"`
+	AffectedReplicas uint64 `json:"affected_replicas,omitempty"`
 }
 
 // CommonPlacementSpec is the spec that's common for replica and volume affinity and anti-affinity rules
@@ -62,7 +58,7 @@ type CommonPlacementSpec struct {
 	// Weight defines the weight of the rule which allows to break the tie with other matching rules. A rule with
 	// higher weight wins over a rule with lower weight.
 	// (optional)
-	Weight int64 `json:"weight,omitempty"`
+	Weight uint64 `json:"weight,omitempty"`
 	// Enforcement specifies the rule enforcement policy. Can take values: required or preferred.
 	// (optional)
 	Enforcement v1beta1.EnforcementType `json:"enforcement,omitempty"`

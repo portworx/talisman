@@ -19,6 +19,7 @@ limitations under the License.
 package versioned
 
 import (
+	portworxv1beta1 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta1"
 	portworxv1beta2 "github.com/portworx/talisman/pkg/client/clientset/versioned/typed/portworx/v1beta2"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
@@ -27,6 +28,7 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
+	PortworxV1beta1() portworxv1beta1.PortworxV1beta1Interface
 	PortworxV1beta2() portworxv1beta2.PortworxV1beta2Interface
 	// Deprecated: please explicitly pick a version if possible.
 	Portworx() portworxv1beta2.PortworxV1beta2Interface
@@ -36,7 +38,13 @@ type Interface interface {
 // version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
+	portworxV1beta1 *portworxv1beta1.PortworxV1beta1Client
 	portworxV1beta2 *portworxv1beta2.PortworxV1beta2Client
+}
+
+// PortworxV1beta1 retrieves the PortworxV1beta1Client
+func (c *Clientset) PortworxV1beta1() portworxv1beta1.PortworxV1beta1Interface {
+	return c.portworxV1beta1
 }
 
 // PortworxV1beta2 retrieves the PortworxV1beta2Client
@@ -66,6 +74,10 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	}
 	var cs Clientset
 	var err error
+	cs.portworxV1beta1, err = portworxv1beta1.NewForConfig(&configShallowCopy)
+	if err != nil {
+		return nil, err
+	}
 	cs.portworxV1beta2, err = portworxv1beta2.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
@@ -82,6 +94,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
+	cs.portworxV1beta1 = portworxv1beta1.NewForConfigOrDie(c)
 	cs.portworxV1beta2 = portworxv1beta2.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
@@ -91,6 +104,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
+	cs.portworxV1beta1 = portworxv1beta1.New(c)
 	cs.portworxV1beta2 = portworxv1beta2.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
