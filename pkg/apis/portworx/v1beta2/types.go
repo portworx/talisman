@@ -65,7 +65,7 @@ type CommonPlacementSpec struct {
 	// TopologyKey key for the matching all segments of the cluster topology with the same key
 	// e.g If the key is failure-domain.beta.kubernetes.io/zone, this should match all nodes with
 	// the same value for this key (i.e in the same zone)
-	TopologyKey string `json:"topology_key,omitempty"`
+	TopologyKey string `json:"topologyKey,omitempty"`
 	// MatchExpressions is a list of label selector requirements. The requirements are ANDed.
 	MatchExpressions []*v1beta1.LabelSelectorRequirement `json:"matchExpressions,omitempty"`
 }
