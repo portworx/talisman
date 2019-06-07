@@ -46,6 +46,16 @@ const (
 	dsEtcPwxVolumeName     = "etcpwx"
 	dsDbusVolumeName       = "dbus"
 	dsSysdVolumeName       = "sysdmount"
+	devVolumeName          = "dev"
+	multipathVolumeName    = "etc-multipath"
+	lvmVolumeName          = "lvm"
+	sysVolumeName          = "sys"
+	udevVolumeName         = "run-udev-data"
+	devMount               = "/dev"
+	multipathMount         = "/etc/multipath"
+	lvmMount               = "/run/lvm"
+	sysMount               = "/sys"
+	udevMount              = "/run/udev/data"
 	sysdmount              = "/etc/systemd/system"
 	dbusPath               = "/var/run/dbus"
 	pksPersistentStoreRoot = "/var/vcap/store"
@@ -1086,6 +1096,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag string) error {
 	trueVar := true
+	typeDirOrCreate := corev1.HostPathDirectoryOrCreate
 	labels := map[string]string{
 		"name": pxNodeWiperDaemonSetName,
 	}
@@ -1152,6 +1163,27 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 									Name:      dsSysdVolumeName,
 									MountPath: sysdmount,
 								},
+								{
+									Name:      devVolumeName,
+									MountPath: devMount,
+								},
+								{
+									Name:      lvmVolumeName,
+									MountPath: lvmMount,
+								},
+								{
+									Name:      multipathVolumeName,
+									MountPath: multipathMount,
+								},
+								{
+									Name:      udevVolumeName,
+									MountPath: udevMount,
+									ReadOnly:  true,
+								},
+								{
+									Name:      sysVolumeName,
+									MountPath: sysMount,
+								},
 							},
 						},
 					},
@@ -1195,6 +1227,48 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
 									Path: sysdmount,
+								},
+							},
+						},
+						{
+							Name: devVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: devMount,
+								},
+							},
+						},
+						{
+							Name: multipathVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: multipathMount,
+									Type: &typeDirOrCreate,
+								},
+							},
+						},
+						{
+							Name: lvmVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: lvmMount,
+									Type: &typeDirOrCreate,
+								},
+							},
+						},
+						{
+							Name: udevVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: udevMount,
+								},
+							},
+						},
+						{
+							Name: sysVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: sysMount,
 								},
 							},
 						},
