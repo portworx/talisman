@@ -273,7 +273,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:c76d7d49a3ca3d25b813260a64c2e4a35b6d46b8c34be5f0f327bcd1b6124022"
+  digest = "1:116854d02887b018cc52c305759f5ac6039b34e68a31daeb00f394437b7f4fc4"
   name = "github.com/libopenstorage/stork"
   packages = [
     "pkg/apis/stork",
@@ -283,7 +283,7 @@
     "pkg/client/clientset/versioned/typed/stork/v1alpha1",
   ]
   pruneopts = "NUT"
-  revision = "f6a79a813f095495cc5787392d5f06225797bc61"
+  revision = "28ff69936f09b5de52e308deae902c1035af11b8"
 
 [[projects]]
   digest = "1:a4df73029d2c42fabcb6b41e327d2f87e685284ec03edf76921c267d9cfc9c23"
@@ -395,14 +395,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:1d6ccbea104558e06b94476b0ffe51a22cf630aa59a51861ad7ff717fd1f543b"
+  digest = "1:06a0203b2794b3f646867262e39b7137e4adb8b4e6f08f087569a4a6268901c6"
   name = "github.com/portworx/sched-ops"
   packages = [
     "k8s",
     "task",
   ]
   pruneopts = "NUT"
-  revision = "aa6fddd67d6ca7a5abb6b19fbd55cde27b20c1e8"
+  revision = "bd82cc90db8dc0bb3b5dd29202f7b3a7869134b8"
 
 [[projects]]
   digest = "1:e256b859ab89f005f2f639f5ed9807d0873d9135e27c6382f419b840ff9abe71"
