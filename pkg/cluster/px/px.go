@@ -23,10 +23,12 @@ import (
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 var (
@@ -34,6 +36,9 @@ var (
 	configMapNameRegex   = regexp.MustCompile("[^a-zA-Z0-9]+")
 	pxListOpts           = metav1.ListOptions{
 		LabelSelector: "name=portworx",
+	}
+	apiLabels = map[string]string{
+		"name": "portworx-api",
 	}
 	errNoPXDaemonset = fmt.Errorf("Portworx daemonset not found on the cluster. Ensure you have " +
 		"Portworx specs applied in the cluster before issuing this operation.")
@@ -46,6 +51,16 @@ const (
 	dsEtcPwxVolumeName     = "etcpwx"
 	dsDbusVolumeName       = "dbus"
 	dsSysdVolumeName       = "sysdmount"
+	devVolumeName          = "dev"
+	multipathVolumeName    = "etc-multipath"
+	lvmVolumeName          = "lvm"
+	sysVolumeName          = "sys"
+	udevVolumeName         = "run-udev-data"
+	devMount               = "/dev"
+	multipathMount         = "/etc/multipath"
+	lvmMount               = "/run/lvm"
+	sysMount               = "/sys"
+	udevMount              = "/run/udev/data"
 	sysdmount              = "/etc/systemd/system"
 	dbusPath               = "/var/run/dbus"
 	pksPersistentStoreRoot = "/var/vcap/store"
@@ -464,8 +479,8 @@ func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 	var err error
 
-	// update RBAC cluster role
-	clusterRole := &rbacv1.ClusterRole{
+	// update PX RBAC cluster role
+	pxClusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: pxClusterRoleName,
 		},
@@ -508,9 +523,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			},
 		},
 	}
-
-	logrus.Infof("Updating [%s] cluster role", pxClusterRoleName)
-	_, err = ops.k8sOps.UpdateClusterRole(clusterRole)
+	_, err = ops.k8sOps.UpdateClusterRole(pxClusterRole)
 	if err != nil {
 		return err
 	}
@@ -620,6 +633,31 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 		}
 
 		logrus.Infof("Successfully upgraded PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
+
+		// Check portworx-service
+		patch := []byte(`{"spec":
+						   {"ports":[
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
+							  {"name":"px-kvdb","port":9019,"protocol":"TCP","targetPort":9019},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							]
+						}}`)
+		_, err = ops.k8sOps.PatchService(pxServiceName, ds.Namespace, patch)
+		if err != nil {
+			return err
+		}
+
+		logrus.Infof("Successfully patched PX service: [%s] %s", ds.Namespace, pxServiceName)
+
+		// Check portowrx-api
+		if err = ops.checkAPIDaemonset(ds.Namespace); err != nil {
+			return err
+		}
+
+		if err = ops.checkAPIService(ds.Namespace); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1086,6 +1124,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag string) error {
 	trueVar := true
+	typeDirOrCreate := corev1.HostPathDirectoryOrCreate
 	labels := map[string]string{
 		"name": pxNodeWiperDaemonSetName,
 	}
@@ -1152,6 +1191,27 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 									Name:      dsSysdVolumeName,
 									MountPath: sysdmount,
 								},
+								{
+									Name:      devVolumeName,
+									MountPath: devMount,
+								},
+								{
+									Name:      lvmVolumeName,
+									MountPath: lvmMount,
+								},
+								{
+									Name:      multipathVolumeName,
+									MountPath: multipathMount,
+								},
+								{
+									Name:      udevVolumeName,
+									MountPath: udevMount,
+									ReadOnly:  true,
+								},
+								{
+									Name:      sysVolumeName,
+									MountPath: sysMount,
+								},
 							},
 						},
 					},
@@ -1195,6 +1255,48 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
 									Path: sysdmount,
+								},
+							},
+						},
+						{
+							Name: devVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: devMount,
+								},
+							},
+						},
+						{
+							Name: multipathVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: multipathMount,
+									Type: &typeDirOrCreate,
+								},
+							},
+						},
+						{
+							Name: lvmVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: lvmMount,
+									Type: &typeDirOrCreate,
+								},
+							},
+						},
+						{
+							Name: udevVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: udevMount,
+								},
+							},
+						},
+						{
+							Name: sysVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: sysMount,
 								},
 							},
 						},
@@ -1251,6 +1353,128 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 	logrus.Infof("Validated successful run of daemonset: [%s] %s", ds.Namespace, ds.Name)
 
 	return nil
+}
+
+func (ops *pxClusterOps) checkAPIDaemonset(namespace string) error {
+	_, err := ops.k8sOps.GetDaemonSet(pxAPIDaemonset, namespace)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+
+		// create it
+		apiDS := &apps_api.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pxAPIDaemonset,
+				Namespace: namespace,
+				Labels:    apiLabels,
+			},
+			Spec: apps_api.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: apiLabels,
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: apiLabels,
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:            pxAPIDaemonset,
+								Image:           "k8s.gcr.io/pause:3.1",
+								ImagePullPolicy: corev1.PullAlways,
+								ReadinessProbe: &corev1.Probe{
+									PeriodSeconds: 10,
+									Handler: v1.Handler{
+										HTTPGet: &corev1.HTTPGetAction{
+											Host: "127.0.0.1",
+											Path: "/status",
+											Port: intstr.FromInt(9001),
+										},
+									},
+								},
+							},
+						},
+						RestartPolicy:      "Always",
+						ServiceAccountName: pxServiceAccountName,
+					},
+				},
+			},
+		}
+
+		_, err = ops.k8sOps.CreateDaemonSet(apiDS)
+		if err != nil {
+			return err
+		}
+
+		logrus.Infof("Created PX API daemonset: [%s] %s", namespace, pxAPIDaemonset)
+	}
+
+	return nil
+}
+
+func (ops *pxClusterOps) checkAPIService(namespace string) error {
+	_, err := ops.k8sOps.GetService(pxAPIServiceName, namespace)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	if errors.IsNotFound(err) {
+		// create it
+		apiService := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pxAPIServiceName,
+				Namespace: namespace,
+				Labels:    apiLabels,
+			},
+			Spec: v1.ServiceSpec{
+				Selector: apiLabels,
+				Type:     corev1.ServiceTypeClusterIP,
+				Ports: []corev1.ServicePort{
+					{
+						Name:       "px-api",
+						Protocol:   corev1.ProtocolTCP,
+						Port:       int32(9001),
+						TargetPort: intstr.FromInt(9001),
+					},
+					{
+						Name:       "px-sdk",
+						Protocol:   corev1.ProtocolTCP,
+						Port:       int32(9020),
+						TargetPort: intstr.FromInt(9020),
+					},
+					{
+						Name:       "px-rest-gateway",
+						Protocol:   corev1.ProtocolTCP,
+						Port:       int32(9021),
+						TargetPort: intstr.FromInt(9021),
+					},
+				},
+			},
+		}
+		_, err = ops.k8sOps.CreateService(apiService)
+		if err != nil {
+			return err
+		}
+		logrus.Infof("Successfully created PX API service: [%s] %s", namespace, pxAPIServiceName)
+	} else {
+		// patch it
+		patch := []byte(`{"spec":
+						   {"ports":[
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							]
+						}}`)
+		_, err = ops.k8sOps.PatchService(pxAPIServiceName, namespace, patch)
+		if err != nil {
+			return err
+		}
+
+		logrus.Infof("Successfully patched PX API service: [%s] %s", namespace, pxAPIServiceName)
+	}
+	return nil
+
 }
 
 func splitCSV(in string) ([]string, error) {

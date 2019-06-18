@@ -334,7 +334,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 
 // getPodsUsingPX returns all pods using Portworx on given k8s node name
 func (k *Instance) getPodsUsingPX() ([]core_api.Pod, error) {
-	pods, err := k.k8sOps.GetPods("")
+	pods, err := k.k8sOps.GetPods("", nil)
 	if err != nil {
 		return nil, err
 	}
