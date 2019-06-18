@@ -1,6 +1,7 @@
 #!/bin/bash
 
 WAIT=0 # 0 means don't wait. Run to completion.
+REMOVE_DATA=0 #0 means do not delete data
 STATUS_FILE=/tmp/px-node-wipe-done
 ETCPWX=/etc/pwx
 OPTPWX=/opt/pwx
@@ -59,6 +60,8 @@ while [ "$1" != "" ]; do
     case $1 in
         -w | --wait  )          WAIT=1
                                 ;;
+        -r | --removedata  )    REMOVE_DATA=1
+                                ;;
         -h | --help )           usage
                                 exit
                                 ;;
@@ -95,10 +98,14 @@ run_with_nsenter "umount $OPTPWX/oci" true
 
 # pxctl node wipe
 if [ -f "$PXCTL" ]; then
-  "$PXCTL" sv node-wipe --all
-  if [ $? -ne 0 ]; then
-	  fatal "error: node wipe failed with code: $?"
-  fi
+    if [ "$REMOVE_DATA" = "1" ]; then
+        "$PXCTL" sv node-wipe --all
+        if [ $? -ne 0 ]; then
+	    fatal "error: node wipe failed with code: $?"
+        fi
+    else
+        echo "-removedata argument not specified. Not wiping the drives"
+    fi
 else
 	echo "warning: path $PXCTL doesn't exist. Skipping $PXCTL sv node-wipe --all"
 fi
@@ -106,17 +113,22 @@ fi
 # Remove binary files
 run_with_nsenter "rm -fr $OPTPWX" false
 
-# Remove configuration files
-chattr -i /etc/pwx/.private.json || true
-rm -rf "$ETCPWX"/{.??,}*
-if [ $? -eq 0 ]; then
-  touch "$STATUS_FILE"
+if [ "$REMOVE_DATA" = "1" ]; then
+    # Remove configuration files
+    chattr -i /etc/pwx/.private.json || true
+    rm -rf "$ETCPWX"/{.??,}*
+    if [ $? -eq 0 ]; then
+        touch "$STATUS_FILE"
 
-  if [ "$WAIT" = "1" ]; then
-    echo "Successfully wiped px. Sleeping..."
-	  sleep_forever
-  fi
-else
+        if [ "$WAIT" = "1" ]; then
+            echo "Successfully wiped px. Sleeping..."
+	    sleep_forever
+        fi
+    else
 	fatal "error: remove pwx configuration failed with code: $?"
+    fi
+else
+    touch "$STATUS_FILE"
+    echo "Successfully wiped px. Sleeping..."
+    sleep_forever
 fi
-
