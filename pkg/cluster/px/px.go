@@ -97,7 +97,7 @@ const (
 	defaultPXImage                  = "portworx/px-enterprise"
 	dockerPullerImage               = "portworx/docker-puller:latest"
 	defaultNodeWiperImage           = "portworx/px-node-wiper"
-	defaultNodeWiperTag             = "2.0.2.1"
+	defaultNodeWiperTag             = "2.0.3.6"
 	pxdRestPort                     = 9001
 	pxServiceName                   = "portworx-service"
 	pxClusterRoleName               = "node-get-put-list-role"
@@ -1137,7 +1137,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 		wiperTag = defaultNodeWiperTag
 	}
 
-	args := []string{"-w"}
+	args := []string{"-w", "-r"}
 	ds := &apps_api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pxNodeWiperDaemonSetName,
