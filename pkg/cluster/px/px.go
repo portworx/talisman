@@ -97,7 +97,7 @@ const (
 	defaultPXImage                  = "portworx/px-enterprise"
 	dockerPullerImage               = "portworx/docker-puller:latest"
 	defaultNodeWiperImage           = "portworx/px-node-wiper"
-	defaultNodeWiperTag             = "2.0.3.6"
+	defaultNodeWiperTag             = "2.1.1"
 	pxdRestPort                     = 9001
 	pxServiceName                   = "portworx-service"
 	pxClusterRoleName               = "node-get-put-list-role"
