@@ -304,7 +304,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
 	var configParseErr error
-	_, _, _, ops.platform, configParseErr = ops.parseConfigFromDaemonset()
+	_, _, _, ops.platform, _, configParseErr = ops.parseConfigFromDaemonset()
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for upgrading PX due to err: %v", configParseErr)
 		return err
@@ -350,11 +350,12 @@ func (ops *pxClusterOps) Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) erro
 		kvdbOpts       map[string]string
 		clusterName    string
 		configParseErr error
+		affinity       *v1.Affinity
 	)
 
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
-	endpoints, kvdbOpts, clusterName, ops.platform, configParseErr = ops.parseConfigFromDaemonset()
+	endpoints, kvdbOpts, clusterName, ops.platform, affinity, configParseErr = ops.parseConfigFromDaemonset()
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for deleting PX due to err: %v", configParseErr)
 		return err
@@ -374,7 +375,7 @@ func (ops *pxClusterOps) Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) erro
 		// cluster might have been started with incorrect kvdb information. So we won't be able to wipe that off.
 
 		// Wipe px from each node
-		err := ops.runPXNodeWiper(pwxHostPathRoot, opts.WiperImage, opts.WiperTag)
+		err := ops.runPXNodeWiper(pwxHostPathRoot, opts.WiperImage, opts.WiperTag, affinity)
 		if err != nil {
 			logrus.Warnf("Failed to wipe Portworx local node state. err: %v", err)
 		}
@@ -655,7 +656,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 		logrus.Infof("Successfully patched PX service: [%s] %s", ds.Namespace, pxServiceName)
 
 		// Check portowrx-api
-		if err = ops.checkAPIDaemonset(ds.Namespace); err != nil {
+		if err = ops.checkAPIDaemonset(ds.Namespace, ds.Spec.Template.Spec.Affinity); err != nil {
 			return err
 		}
 
@@ -869,14 +870,15 @@ func (ops *pxClusterOps) wipePXKvdb(endpoints []string, opts map[string]string, 
 	return kvdbInst.DeleteTree(clusterName)
 }
 
-func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string, string, platformType, error) {
+func (ops *pxClusterOps) parseConfigFromDaemonset() (
+	[]string, map[string]string, string, platformType, *v1.Affinity, error) {
 	dss, err := ops.getPXDaemonsets()
 	if err != nil {
-		return nil, nil, "", platformTypeDefault, err
+		return nil, nil, "", platformTypeDefault, nil, err
 	}
 
 	if len(dss) == 0 {
-		return nil, nil, "", platformTypeDefault, errNoPXDaemonset
+		return nil, nil, "", platformTypeDefault, nil, errNoPXDaemonset
 	}
 
 	platform := platformTypeDefault
@@ -896,6 +898,7 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 		}
 	}
 
+	affinity := ds.Spec.Template.Spec.Affinity
 	for _, c := range ds.Spec.Template.Spec.Containers {
 		if c.Name == pxDaemonsetContainerName {
 			for i, arg := range c.Args {
@@ -908,12 +911,12 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 				case "-k":
 					endpoints, err = splitCSV(c.Args[i+1])
 					if err != nil {
-						return nil, nil, clusterName, platform, err
+						return nil, nil, clusterName, platform, affinity, err
 					}
 				case "-pwd":
 					parts := strings.Split(c.Args[i+1], ":")
 					if len(parts) != 0 {
-						return nil, nil, clusterName, platform, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
+						return nil, nil, clusterName, platform, affinity, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
 					}
 					opts[kvdb.UsernameKey] = parts[0]
 					opts[kvdb.PasswordKey] = parts[1]
@@ -935,20 +938,20 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() ([]string, map[string]string
 	}
 
 	if usingInternalEtcd {
-		return endpoints, opts, clusterName, platform, errUsingInternalEtcd
+		return endpoints, opts, clusterName, platform, affinity, errUsingInternalEtcd
 	}
 
 	if len(endpoints) == 0 {
-		return nil, opts, clusterName, platform, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
+		return nil, opts, clusterName, platform, affinity, fmt.Errorf("failed to get kvdb endpoint from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
 	if len(clusterName) == 0 {
-		return endpoints, opts, "", platform, fmt.Errorf("failed to get cluster name from daemonset containers: %v",
+		return endpoints, opts, "", platform, affinity, fmt.Errorf("failed to get cluster name from daemonset containers: %v",
 			ds.Spec.Template.Spec.Containers)
 	}
 
-	return endpoints, opts, clusterName, platform, nil
+	return endpoints, opts, clusterName, platform, affinity, nil
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
@@ -1138,7 +1141,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	return nil
 }
 
-func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag string) error {
+func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag string, affinity *v1.Affinity) error {
 	trueVar := true
 	typeDirOrCreate := corev1.HostPathDirectoryOrCreate
 	labels := map[string]string{
@@ -1169,7 +1172,8 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
-					HostPID: true,
+					HostPID:  true,
+					Affinity: affinity,
 					Containers: []corev1.Container{
 						{
 							Name:            pxNodeWiperDaemonSetName,
@@ -1372,7 +1376,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 	return nil
 }
 
-func (ops *pxClusterOps) checkAPIDaemonset(namespace string) error {
+func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affinity) error {
 	_, err := ops.k8sOps.GetDaemonSet(pxAPIDaemonset, namespace)
 	if err != nil {
 		if !errors.IsNotFound(err) {
@@ -1419,6 +1423,11 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string) error {
 			},
 		}
 
+		if affinity != nil && affinity.NodeAffinity != nil {
+			apiDS.Spec.Template.Spec.Affinity = &v1.Affinity{
+				NodeAffinity: affinity.NodeAffinity,
+			}
+		}
 		_, err = ops.k8sOps.CreateDaemonSet(apiDS)
 		if err != nil {
 			return err
@@ -1469,6 +1478,7 @@ func (ops *pxClusterOps) checkAPIService(namespace string) error {
 				},
 			},
 		}
+
 		_, err = ops.k8sOps.CreateService(apiService)
 		if err != nil {
 			return err
