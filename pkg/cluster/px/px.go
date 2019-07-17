@@ -281,7 +281,9 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 
 	isAppDrainNeeded, err := ops.isUpgradeAppDrainRequired(newSpec, clusterManager)
 	if err != nil {
-		return err
+		logrus.Infof("failed to check application drain requirement due to: %v", err)
+		// This was added for old versions and is no longer a hard requirement.
+		// Hence ignoring the error now.
 	}
 
 	if isAppDrainNeeded {
