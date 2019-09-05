@@ -114,6 +114,7 @@ const (
 	lhConfigMap                     = "px-lighthouse-config"
 	lhServiceName                   = "px-lighthouse"
 	lhDeploymentName                = "px-lighthouse"
+	csiExtDeploymentName            = "px-csi-ext"
 	bootstrapCloudDriveNamespace    = "kube-system"
 	internalEtcdConfigMapPrefix     = "px-bootstrap-"
 	cloudDriveConfigMapPrefix       = "px-cloud-drive-"
@@ -1035,6 +1036,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			storkSchedulerName,
 			pvcControllerName,
 			lhDeploymentName,
+			csiExtDeploymentName,
 		}
 		for _, depName := range depNames {
 			err = ops.k8sOps.DeleteDeployment(depName, ns)
