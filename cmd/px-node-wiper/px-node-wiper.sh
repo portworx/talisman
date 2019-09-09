@@ -116,6 +116,7 @@ run_with_nsenter "rm -fr $OPTPWX" false
 if [ "$REMOVE_DATA" = "1" ]; then
     # Remove configuration files
     chattr -i /etc/pwx/.private.json || true
+    chattr -i /etc/pwx/config.json || true
     rm -rf "$ETCPWX"/{.??,}*
     if [ $? -eq 0 ]; then
         touch "$STATUS_FILE"
