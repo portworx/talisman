@@ -140,6 +140,7 @@ const (
 	csiAccount                      = "px-csi-account"
 	csiClusterRole                  = "px-csi-role"
 	csiStatefulSet                  = "px-csi-ext"
+	osbSecretName                   = "px-osb"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
 	pxImageEnvKey                   = "PX_IMAGE"
@@ -1102,6 +1103,17 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		for _, ss := range statefulSets {
 			err = ops.k8sOps.DeleteStatefulSet(ss, ns)
+			if err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		secrets := []string{
+			osbSecretName,
+		}
+
+		for _, sec := range secrets {
+			err = ops.k8sOps.DeleteSecret(sec, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
