@@ -1399,7 +1399,8 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 						Labels: apiLabels,
 					},
 					Spec: corev1.PodSpec{
-						Affinity: affinity,
+						Affinity:    affinity,
+						HostNetwork: true,
 						Containers: []corev1.Container{
 							{
 								Name:            pxAPIDaemonset,
