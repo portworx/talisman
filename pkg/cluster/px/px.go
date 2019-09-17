@@ -1169,6 +1169,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					HostPID: true,
 					Containers: []corev1.Container{
 						{
 							Name:            pxNodeWiperDaemonSetName,
