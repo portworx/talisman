@@ -101,8 +101,10 @@ if [ -f "$PXCTL" ]; then
     if [ "$REMOVE_DATA" = "1" ]; then
 	PXCFG=/etc/pwx/config.json
 	if [ -s ${PXCFG} -a "lvm" == "$(jq -r '.storage.type' ${PXCFG})" ]; then
-            # special case caching because it requires pkgs and mounts. So executed from the host.
+            # special case caching because it requires pkgs and mounts. So execute from px-runc on the host.
 	    run_with_nsenter "env PX_NODE_WIPER=true $PXCTL sv node-wipe --all" false
+	    # px-runc will remount so need unmount oci again
+	    run_with_nsenter "umount $OPTPWX/oci" true
 	else
             "$PXCTL" sv node-wipe --all
 	fi
