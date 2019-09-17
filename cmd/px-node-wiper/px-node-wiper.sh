@@ -99,7 +99,13 @@ run_with_nsenter "umount $OPTPWX/oci" true
 # pxctl node wipe
 if [ -f "$PXCTL" ]; then
     if [ "$REMOVE_DATA" = "1" ]; then
-        "$PXCTL" sv node-wipe --all
+	PXCFG=/etc/pwx/config.json
+	if [ -s ${PXCFG} -a "lvm" == "$(jq -r '.storage.type' ${PXCFG})" ]; then
+            # special case caching because it requires pkgs and mounts. So executed from the host.
+	    run_with_nsenter "env PX_NODE_WIPER=true $PXCTL sv node-wipe --all" false
+	else
+            "$PXCTL" sv node-wipe --all
+	fi
         if [ $? -ne 0 ]; then
 	    fatal "error: node wipe failed with code: $?"
         fi
