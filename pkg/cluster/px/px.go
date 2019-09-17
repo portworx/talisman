@@ -1399,6 +1399,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 						Labels: apiLabels,
 					},
 					Spec: corev1.PodSpec{
+						Affinity: affinity,
 						Containers: []corev1.Container{
 							{
 								Name:            pxAPIDaemonset,
@@ -1423,11 +1424,6 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 			},
 		}
 
-		if affinity != nil && affinity.NodeAffinity != nil {
-			apiDS.Spec.Template.Spec.Affinity = &v1.Affinity{
-				NodeAffinity: affinity.NodeAffinity,
-			}
-		}
 		_, err = ops.k8sOps.CreateDaemonSet(apiDS)
 		if err != nil {
 			return err
