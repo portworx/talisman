@@ -639,15 +639,33 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 
 		logrus.Infof("Successfully upgraded PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 
-		// Check portworx-service
-		patch := []byte(`{"spec":
+		// default target ports for portworx-service
+		targetPorts := map[int32]int32{
+			9001: 9001,
+			9019: 9019,
+			9020: 9020,
+			9021: 9021,
+		}
+
+		// Check portworx-service and override default target ports
+		pxService, err := ops.k8sOps.GetService(pxServiceName, ds.Namespace)
+		if err != nil {
+			return err
+
+		}
+
+		for _, port := range pxService.Spec.Ports {
+			targetPorts[port.Port] = port.TargetPort.IntVal
+		}
+
+		patch := []byte(fmt.Sprintf(`{"spec":
 						   {"ports":[
-							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
-							  {"name":"px-kvdb","port":9019,"protocol":"TCP","targetPort":9019},
-							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
-							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-kvdb","port":9019,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
-						}}`)
+						}}`, targetPorts[9001], targetPorts[9019], targetPorts[9020], targetPorts[9021]))
 		_, err = ops.k8sOps.PatchService(pxServiceName, ds.Namespace, patch)
 		if err != nil {
 			return err
@@ -660,7 +678,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			return err
 		}
 
-		if err = ops.checkAPIService(ds.Namespace); err != nil {
+		if err = ops.checkAPIService(ds.Namespace, targetPorts); err != nil {
 			return err
 		}
 	}
@@ -1436,7 +1454,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 	return nil
 }
 
-func (ops *pxClusterOps) checkAPIService(namespace string) error {
+func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32]int32) error {
 	_, err := ops.k8sOps.GetService(pxAPIServiceName, namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
@@ -1458,19 +1476,19 @@ func (ops *pxClusterOps) checkAPIService(namespace string) error {
 						Name:       "px-api",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9001),
-						TargetPort: intstr.FromInt(9001),
+						TargetPort: intstr.FromInt(int(targetPorts[9001])),
 					},
 					{
 						Name:       "px-sdk",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9020),
-						TargetPort: intstr.FromInt(9020),
+						TargetPort: intstr.FromInt(int(targetPorts[9020])),
 					},
 					{
 						Name:       "px-rest-gateway",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9021),
-						TargetPort: intstr.FromInt(9021),
+						TargetPort: intstr.FromInt(int(targetPorts[9021])),
 					},
 				},
 			},
