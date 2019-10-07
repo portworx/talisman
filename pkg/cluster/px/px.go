@@ -541,13 +541,8 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 	var dss []apps_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
-	pxImage := fmt.Sprintf("%s:%s", spec.PXImage, spec.PXTag)
 	ociImage := fmt.Sprintf("%s:%s", spec.OCIMonImage, spec.OCIMonTag)
-
 	newVersion := ociImage
-	if spec.PXTag != spec.OCIMonTag {
-		newVersion = pxImage
-	}
 
 	t := func() (interface{}, bool, error) {
 		dss, err = ops.getPXDaemonsets()
@@ -567,7 +562,14 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == pxDaemonsetContainerName {
 					oldPxImage := getEnv(c.Env, pxImageEnvKey)
-					if c.Image == ociImage && oldPxImage == pxImage {
+
+					if len(oldPxImage) > 0 {
+						return nil, false, fmt.Errorf("%s=%s env variable is set in the PX Daemonset. "+
+							"This upgrade method doesn't support that. Remove the environment variable and retry. ",
+							pxImageEnvKey, oldPxImage)
+					}
+
+					if c.Image == ociImage {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, ociImage)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
@@ -575,9 +577,6 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 					} else {
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration + 1
 						c.Image = ociImage
-						if spec.OCIMonTag != spec.PXTag && oldPxImage != pxImage {
-							c.Env = setEnv(c.Env, pxImageEnvKey, pxImage)
-						}
 						dsCopy.Annotations[changeCauseAnnotation] = fmt.Sprintf("update PX to %s", newVersion)
 					}
 					break
