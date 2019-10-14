@@ -21,17 +21,18 @@ const (
 
 // command line arguments
 var (
-	newPXImage           string
-	newPXTag             string
-	newOCIMonImage       string
-	newOCIMonTag         string
-	wiperImage           string
-	wiperTag             string
-	op                   string
-	dockerRegistrySecret string
-	kubeconfig           string
-	sharedAppsScaleDown  string
-	wipeCluster          bool
+	newPXImage            string
+	newPXTag              string
+	newOCIMonImage        string
+	newOCIMonTag          string
+	wiperImage            string
+	wiperTag              string
+	op                    string
+	dockerRegistrySecret  string
+	kubeconfig            string
+	sharedAppsScaleDown   string
+	wipeCluster           bool
+	upgradeTimeoutPerNode int
 )
 
 func main() {
@@ -76,6 +77,7 @@ func doUpgrade() {
 
 	opts := &px.UpgradeOptions{
 		SharedAppsScaleDown: px.SharedAppsScaleDownMode(sharedAppsScaleDown),
+		TimeoutPerNode:      upgradeTimeoutPerNode,
 	}
 
 	err = inst.Upgrade(newSpec, opts)
@@ -133,4 +135,5 @@ func init() {
 		"This means all the data will be wiped off from the cluster and cannot be recovered")
 	flag.StringVar(&wiperImage, "wiperimage", "", "Node wiper image to use for the upgrade")
 	flag.StringVar(&wiperTag, "wipertag", "", "Node wiper tag to use for the upgrade")
+	flag.IntVar(&upgradeTimeoutPerNode, "upgradetimeoutpernode", 600, "Timeout per node in seconds for performing upgrade")
 }

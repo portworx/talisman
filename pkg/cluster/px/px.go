@@ -166,6 +166,7 @@ const (
 // UpgradeOptions are options to customize the upgrade process
 type UpgradeOptions struct {
 	SharedAppsScaleDown SharedAppsScaleDownMode
+	TimeoutPerNode      int
 }
 
 // DeleteOptions are options to customize the delete process
@@ -336,7 +337,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 	}
 
 	// 3. Start rolling upgrade of PX DaemonSet
-	err = ops.upgradePX(newSpec.Spec)
+	err = ops.upgradePX(newSpec.Spec, opts)
 	if err != nil {
 		return err
 	}
@@ -481,7 +482,7 @@ func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 }
 
 // upgradePX upgrades PX daemonsets and waits till all replicas are ready
-func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
+func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOptions) error {
 	var err error
 
 	// update PX RBAC cluster role
@@ -625,7 +626,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			return err
 		}
 
-		daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
+		daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout(opts.TimeoutPerNode)
 		if err != nil {
 			return err
 		}
@@ -858,13 +859,13 @@ func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
 	return nil
 }
 
-func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
+func (ops *pxClusterOps) getDaemonSetReadyTimeout(timeoutPerNode int) (time.Duration, error) {
 	nodes, err := ops.k8sOps.GetNodes()
 	if err != nil {
 		return 0, err
 	}
 
-	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * 10 * time.Minute
+	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * time.Duration(timeoutPerNode) * time.Second
 	return daemonsetReadyTimeout, nil
 }
 
