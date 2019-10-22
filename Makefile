@@ -82,7 +82,7 @@ checkfmt:
 
 lint:
 	@echo "golint"
-	go get -u golang.org/x/lint/golint
+	go install golang.org/x/lint/golint
 	for file in $$(find . -name '*.go' | grep -v vendor | \
 																			grep -v '\.pb\.go' | \
 																			grep -v '\.pb\.gw\.go' | \
@@ -101,7 +101,7 @@ vet:
 
 errcheck:
 	@echo "errcheck"
-	go get -v github.com/kisielk/errcheck
+	go install github.com/kisielk/errcheck
 	errcheck -tags "$(TAGS)" $(GOVET_PKGS)
 
 codegen:
