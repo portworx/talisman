@@ -45,6 +45,9 @@ else
     BUILD_OPTIONS += -i -v -ldflags "$(LDFLAGS)"
 endif
 
+# Talisman can only be built with go 1.11+ which supports go modules
+export GO111MODULE=on
+export GOFLAGS = -mod=vendor
 
 PKGS=$(shell go list ./... | grep -v vendor)
 GOVET_PKGS=$(shell  go list ./... | grep -v vendor | grep -v pkg/client/informers/externalversions | grep -v versioned)
