@@ -1501,13 +1501,13 @@ func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32
 		logrus.Infof("Successfully created PX API service: [%s] %s", namespace, pxAPIServiceName)
 	} else {
 		// patch it
-		patch := []byte(`{"spec":
+		patch := []byte(fmt.Sprintf(`{"spec":
 						   {"ports":[
-							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
-							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
-							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
-						}}`)
+						}}`, targetPorts[9001], targetPorts[9020], targetPorts[9021]))
 		_, err = ops.k8sOps.PatchService(pxAPIServiceName, namespace, patch)
 		if err != nil {
 			return err
