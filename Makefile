@@ -45,6 +45,9 @@ else
     BUILD_OPTIONS += -i -v -ldflags "$(LDFLAGS)"
 endif
 
+# Talisman can only be built with go 1.11+ which supports go modules
+export GO111MODULE=on
+export GOFLAGS = -mod=vendor
 
 PKGS=$(shell go list ./... | grep -v vendor)
 GOVET_PKGS=$(shell  go list ./... | grep -v vendor | grep -v pkg/client/informers/externalversions | grep -v versioned)
@@ -79,7 +82,7 @@ checkfmt:
 
 lint:
 	@echo "golint"
-	go get -u golang.org/x/lint/golint
+	go install golang.org/x/lint/golint
 	for file in $$(find . -name '*.go' | grep -v vendor | \
 																			grep -v '\.pb\.go' | \
 																			grep -v '\.pb\.gw\.go' | \
@@ -98,7 +101,7 @@ vet:
 
 errcheck:
 	@echo "errcheck"
-	go get -v github.com/kisielk/errcheck
+	go install github.com/kisielk/errcheck
 	errcheck -tags "$(TAGS)" $(GOVET_PKGS)
 
 codegen:

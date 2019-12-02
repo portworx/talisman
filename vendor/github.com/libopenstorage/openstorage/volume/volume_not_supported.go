@@ -50,7 +50,7 @@ func (s *snapshotNotSupported) Restore(volumeID, snapshotID string) error {
 	return ErrNotSupported
 }
 
-func (s *snapshotNotSupported) SnapshotGroup(groupID string, labels map[string]string) (*api.GroupSnapCreateResponse, error) {
+func (s *snapshotNotSupported) SnapshotGroup(groupID string, labels map[string]string, volumeIDs []string) (*api.GroupSnapCreateResponse, error) {
 	return nil, ErrNotSupported
 }
 
@@ -145,8 +145,8 @@ func (cl *cloudBackupNotSupported) CloudBackupCreate(
 
 func (cl *cloudBackupNotSupported) CloudBackupGroupCreate(
 	input *api.CloudBackupGroupCreateRequest,
-) error {
-	return ErrNotSupported
+) (*api.CloudBackupGroupCreateResponse, error) {
+	return nil, ErrNotSupported
 }
 
 func (cl *cloudBackupNotSupported) CloudBackupRestore(
@@ -201,6 +201,18 @@ func (cl *cloudBackupNotSupported) CloudBackupSchedCreate(
 	input *api.CloudBackupSchedCreateRequest,
 ) (*api.CloudBackupSchedCreateResponse, error) {
 	return nil, ErrNotSupported
+}
+
+func (cl *cloudBackupNotSupported) CloudBackupSchedUpdate(
+	input *api.CloudBackupSchedUpdateRequest,
+) error {
+	return ErrNotSupported
+}
+
+func (cl *cloudBackupNotSupported) CloudBackupGroupSchedUpdate(
+	input *api.CloudBackupGroupSchedUpdateRequest,
+) error {
+	return ErrNotSupported
 }
 
 func (cl *cloudBackupNotSupported) CloudBackupGroupSchedCreate(

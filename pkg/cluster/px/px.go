@@ -21,7 +21,7 @@ import (
 	apiv1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/sirupsen/logrus"
-	apps_api "k8s.io/api/apps/v1beta2"
+	apps_api "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -200,7 +200,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	k8sOps := k8s.Instance()
 
 	// Detect the installedNamespace
-	namespaces, err := k8sOps.ListNamespaces()
+	namespaces, err := k8sOps.ListNamespaces(map[string]string{})
 	if err != nil {
 		return nil, err
 	}
