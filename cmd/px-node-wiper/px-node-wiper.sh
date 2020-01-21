@@ -17,13 +17,11 @@ fatal() {
     exit 1
 }
 
-usage()
-{
+usage() {
     echo "usage: $0 [-w <wait-on-success>] ] | [-h]]"
 }
 
-cleanup ()
-{
+cleanup () {
   kill -s SIGTERM $!
   exit 0
 }
@@ -40,45 +38,43 @@ sleep_forever() {
 #       $1 [true|false] if true, error is ignored
 run_with_nsenter() {
   if [ "$#" -ne "2" ]; then
-		fatal "insufficient number of arguments ($#) passed to run_with_nsenter()"
-	fi
+    fatal "insufficient number of arguments ($#) passed to run_with_nsenter()"
+  fi
 
-	echo "running $1 on the host's proc/1 namespace"
-	nsenter --mount=$HOSTPROC1_NS/mnt -- $1
-	if [ "$?" -ne "0" ]; then
-		if [ "$2" = false ]; then
-		  fatal "nsenter command: $1 failed with exit code: $?"
-		else
-			echo "ignoring failure of nsenter command: $1"
-		fi
-	fi
+  echo "running $1 on the host's proc/1 namespace"
+  nsenter --mount=$HOSTPROC1_NS/mnt -- $1
+  if [ "$?" -ne "0" ]; then
+    if [ "$2" = false ]; then
+      fatal "nsenter command: $1 failed with exit code: $?"
+    else
+      echo "ignoring failure of nsenter command: $1"
+    fi
+  fi
 }
 
 trap cleanup SIGINT SIGTERM
 
 while [ "$1" != "" ]; do
-    case $1 in
-        -w | --wait  )          WAIT=1
-                                ;;
-        -r | --removedata  )    REMOVE_DATA=1
-                                ;;
-        -h | --help )           usage
-                                exit
-                                ;;
-        * )                     usage
-                                exit 1
-    esac
-    shift
+  case $1 in
+    -w | --wait)       WAIT=1
+                       ;;
+    -r | --removedata) REMOVE_DATA=1
+                       ;;
+    -h | --help)       usage
+                       exit
+                       ;;
+    * )                usage
+                       exit 1
+  esac
+  shift
 done
 
 ##### pre-checks
-if [ ! -d "$ETCPWX" ]; then
-	fatal "error: path $ETCPWX doesn't exist. Ensure you started the container with $ETCPWX mounted"
-fi
+[ -d "$ETCPWX" ] || \
+  fatal "error: path $ETCPWX doesn't exist. Ensure you started the container with $ETCPWX mounted"
 
-if [ ! -d "$HOSTPROC1_NS" ]; then
-	fatal "error: path $HOSTPROC1_NS doesn't exist. Ensure you started the container with $HOSTPROC_NS mounted"
-fi
+[ -d "$HOSTPROC1_NS" ] || \
+  fatal "error: path $HOSTPROC1_NS doesn't exist. Ensure you started the container with $HOSTPROC_NS mounted"
 
 
 # Remove systemd service (if any)
@@ -92,44 +88,40 @@ systemctl stop portworx || true
 systemctl disable portworx || true
 
 rm -rf /etc/systemd/system/*portworx*
+systemctl daemon-reload
 
 # unmount oci
 run_with_nsenter "umount $OPTPWX/oci" true
 
 # pxctl node wipe
-if [ -f "$PXCTL" ]; then
-    if [ "$REMOVE_DATA" = "1" ]; then
-        "$PXCTL" sv node-wipe --all
-        if [ $? -ne 0 ]; then
-	    fatal "error: node wipe failed with code: $?"
-        fi
-    else
-        echo "-removedata argument not specified. Not wiping the drives"
-    fi
+if [ ! -f "$PXCTL" ]; then
+  echo "warning: path $PXCTL doesn't exist. Skipping $PXCTL sv node-wipe --all"
+elif [ "$REMOVE_DATA" = "1" ]; then
+  "$PXCTL" sv node-wipe --all || \
+    fatal "error: node wipe failed with code: $?"
 else
-	echo "warning: path $PXCTL doesn't exist. Skipping $PXCTL sv node-wipe --all"
+  echo "-removedata argument not specified. Not wiping the drives"
 fi
 
 # Remove binary files
 run_with_nsenter "rm -fr $OPTPWX" false
 
 if [ "$REMOVE_DATA" = "1" ]; then
-    # Remove configuration files
-    chattr -i /etc/pwx/.private.json || true
-    chattr -i /etc/pwx/config.json || true
-    rm -rf "$ETCPWX"/{.??,}*
-    if [ $? -eq 0 ]; then
-        touch "$STATUS_FILE"
-
-        if [ "$WAIT" = "1" ]; then
-            echo "Successfully wiped px. Sleeping..."
-	    sleep_forever
-        fi
-    else
-	fatal "error: remove pwx configuration failed with code: $?"
-    fi
-else
+  # Remove configuration files
+  chattr -i /etc/pwx/.private.json || true
+  chattr -i /etc/pwx/config.json || true
+  rm -rf "$ETCPWX"/{.??,}*
+  if [ $? -eq 0 ]; then
     touch "$STATUS_FILE"
-    echo "Successfully wiped px. Sleeping..."
-    sleep_forever
+    if [ "$WAIT" = "1" ]; then
+      echo "Successfully wiped px. Sleeping..."
+      sleep_forever
+    fi
+  else
+      fatal "error: remove pwx configuration failed with code: $?"
+  fi
+else
+  touch "$STATUS_FILE"
+  echo "Successfully wiped px. Sleeping..."
+  sleep_forever
 fi
