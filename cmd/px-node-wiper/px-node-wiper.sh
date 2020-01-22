@@ -88,6 +88,7 @@ systemctl stop portworx || true
 systemctl disable portworx || true
 
 rm -rf /etc/systemd/system/*portworx*
+run_with_nsenter "systemctl daemon-reload" true
 systemctl daemon-reload
 
 # unmount oci
