@@ -141,6 +141,7 @@ const (
 	csiClusterRole                  = "px-csi-role"
 	csiStatefulSet                  = "px-csi-ext"
 	osbSecretName                   = "px-osb"
+	essentialSecretName             = "px-essential"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
 	pxImageEnvKey                   = "PX_IMAGE"
@@ -1131,6 +1132,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		secrets := []string{
 			osbSecretName,
+			essentialSecretName,
 		}
 
 		for _, sec := range secrets {
