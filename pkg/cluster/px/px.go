@@ -528,6 +528,21 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 				Resources: []string{"volumeplacementstrategies"},
 				Verbs:     []string{"get", "list"},
 			},
+			{
+				APIGroups: []string{"stork.libopenstorage.org"},
+				Resources: []string{"backuplocations"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
+				APIGroups: []string{"core.libopenstorage.org"},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"events"},
+				Verbs:     []string{"create"},
+			},
 		},
 	}
 	_, err = ops.k8sOps.UpdateClusterRole(pxClusterRole)
