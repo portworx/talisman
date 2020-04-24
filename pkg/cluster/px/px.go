@@ -42,6 +42,7 @@ var (
 	}
 	errNoPXDaemonset = fmt.Errorf("Portworx daemonset not found on the cluster. Ensure you have " +
 		"Portworx specs applied in the cluster before issuing this operation.")
+	cores = "/var/cores"
 )
 
 const (
@@ -55,6 +56,7 @@ const (
 	multipathVolumeName    = "etc-multipath"
 	lvmVolumeName          = "lvm"
 	sysVolumeName          = "sys"
+	coresVolumeName        = "cores"
 	udevVolumeName         = "run-udev-data"
 	devMount               = "/dev"
 	multipathMount         = "/etc/multipath"
@@ -1191,6 +1193,10 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 		wiperTag = defaultNodeWiperTag
 	}
 
+	if pwxHostPathRoot == pksPersistentStoreRoot {
+		cores = "/cores"
+	}
+
 	args := []string{"-w", "-r"}
 	ds := &apps_api.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1267,6 +1273,10 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 								{
 									Name:      sysVolumeName,
 									MountPath: sysMount,
+								},
+								{
+									Name:      coresVolumeName,
+									MountPath: "/var/cores",
 								},
 							},
 						},
@@ -1353,6 +1363,14 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
 									Path: sysMount,
+								},
+							},
+						},
+						{
+							Name: coresVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: pwxHostPathRoot + cores,
 								},
 							},
 						},
