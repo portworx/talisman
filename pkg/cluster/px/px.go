@@ -21,7 +21,7 @@ import (
 	apiv1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/k8sutils"
 	"github.com/sirupsen/logrus"
-	apps_api "k8s.io/api/apps/v1beta2"
+	apps_api "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -143,6 +143,7 @@ const (
 	csiClusterRole                  = "px-csi-role"
 	csiStatefulSet                  = "px-csi-ext"
 	osbSecretName                   = "px-osb"
+	essentialSecretName             = "px-essential"
 	pxNodeWiperDaemonSetName        = "px-node-wiper"
 	pxKvdbPrefix                    = "pwx/"
 	pxImageEnvKey                   = "PX_IMAGE"
@@ -168,6 +169,7 @@ const (
 // UpgradeOptions are options to customize the upgrade process
 type UpgradeOptions struct {
 	SharedAppsScaleDown SharedAppsScaleDownMode
+	TimeoutPerNode      int
 }
 
 // DeleteOptions are options to customize the delete process
@@ -201,7 +203,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	k8sOps := k8s.Instance()
 
 	// Detect the installedNamespace
-	namespaces, err := k8sOps.ListNamespaces()
+	namespaces, err := k8sOps.ListNamespaces(map[string]string{})
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +340,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 	}
 
 	// 3. Start rolling upgrade of PX DaemonSet
-	err = ops.upgradePX(newSpec.Spec)
+	err = ops.upgradePX(newSpec.Spec, opts)
 	if err != nil {
 		return err
 	}
@@ -483,7 +485,7 @@ func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 }
 
 // upgradePX upgrades PX daemonsets and waits till all replicas are ready
-func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
+func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOptions) error {
 	var err error
 
 	// update PX RBAC cluster role
@@ -528,6 +530,21 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 				Resources: []string{"volumeplacementstrategies"},
 				Verbs:     []string{"get", "list"},
 			},
+			{
+				APIGroups: []string{"stork.libopenstorage.org"},
+				Resources: []string{"backuplocations"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
+				APIGroups: []string{"core.libopenstorage.org"},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"events"},
+				Verbs:     []string{"create"},
+			},
 		},
 	}
 	_, err = ops.k8sOps.UpdateClusterRole(pxClusterRole)
@@ -543,13 +560,8 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 	var dss []apps_api.DaemonSet
 	expectedGenerations := make(map[types.UID]int64)
 
-	pxImage := fmt.Sprintf("%s:%s", spec.PXImage, spec.PXTag)
 	ociImage := fmt.Sprintf("%s:%s", spec.OCIMonImage, spec.OCIMonTag)
-
 	newVersion := ociImage
-	if spec.PXTag != spec.OCIMonTag {
-		newVersion = pxImage
-	}
 
 	t := func() (interface{}, bool, error) {
 		dss, err = ops.getPXDaemonsets()
@@ -569,7 +581,14 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 				c := &dsCopy.Spec.Template.Spec.Containers[i]
 				if c.Name == pxDaemonsetContainerName {
 					oldPxImage := getEnv(c.Env, pxImageEnvKey)
-					if c.Image == ociImage && oldPxImage == pxImage {
+
+					if len(oldPxImage) > 0 {
+						return nil, false, fmt.Errorf("%s=%s env variable is set in the PX Daemonset. "+
+							"This upgrade method doesn't support that. Remove the environment variable and retry. ",
+							pxImageEnvKey, oldPxImage)
+					}
+
+					if c.Image == ociImage {
 						logrus.Infof("Skipping upgrade of PX daemonset: [%s] %s as it is already at %s version.",
 							ds.Namespace, ds.Name, ociImage)
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration
@@ -577,9 +596,6 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 					} else {
 						expectedGenerations[ds.UID] = ds.Status.ObservedGeneration + 1
 						c.Image = ociImage
-						if spec.OCIMonTag != spec.PXTag && oldPxImage != pxImage {
-							c.Env = setEnv(c.Env, pxImageEnvKey, pxImage)
-						}
 						dsCopy.Annotations[changeCauseAnnotation] = fmt.Sprintf("update PX to %s", newVersion)
 					}
 					break
@@ -628,7 +644,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			return err
 		}
 
-		daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout()
+		daemonsetReadyTimeout, err := ops.getDaemonSetReadyTimeout(opts.TimeoutPerNode)
 		if err != nil {
 			return err
 		}
@@ -641,15 +657,33 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 
 		logrus.Infof("Successfully upgraded PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 
-		// Check portworx-service
-		patch := []byte(`{"spec":
+		// default target ports for portworx-service
+		targetPorts := map[int32]int32{
+			9001: 9001,
+			9019: 9019,
+			9020: 9020,
+			9021: 9021,
+		}
+
+		// Check portworx-service and override default target ports
+		pxService, err := ops.k8sOps.GetService(pxServiceName, ds.Namespace)
+		if err != nil {
+			return err
+
+		}
+
+		for _, port := range pxService.Spec.Ports {
+			targetPorts[port.Port] = port.TargetPort.IntVal
+		}
+
+		patch := []byte(fmt.Sprintf(`{"spec":
 						   {"ports":[
-							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
-							  {"name":"px-kvdb","port":9019,"protocol":"TCP","targetPort":9019},
-							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
-							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-kvdb","port":9019,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
-						}}`)
+						}}`, targetPorts[9001], targetPorts[9019], targetPorts[9020], targetPorts[9021]))
 		_, err = ops.k8sOps.PatchService(pxServiceName, ds.Namespace, patch)
 		if err != nil {
 			return err
@@ -662,7 +696,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec) error {
 			return err
 		}
 
-		if err = ops.checkAPIService(ds.Namespace); err != nil {
+		if err = ops.checkAPIService(ds.Namespace, targetPorts); err != nil {
 			return err
 		}
 	}
@@ -843,13 +877,13 @@ func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
 	return nil
 }
 
-func (ops *pxClusterOps) getDaemonSetReadyTimeout() (time.Duration, error) {
+func (ops *pxClusterOps) getDaemonSetReadyTimeout(timeoutPerNode int) (time.Duration, error) {
 	nodes, err := ops.k8sOps.GetNodes()
 	if err != nil {
 		return 0, err
 	}
 
-	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * 10 * time.Minute
+	daemonsetReadyTimeout := time.Duration(len(nodes.Items)-1) * time.Duration(timeoutPerNode) * time.Second
 	return daemonsetReadyTimeout, nil
 }
 
@@ -1115,6 +1149,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		secrets := []string{
 			osbSecretName,
+			essentialSecretName,
 		}
 
 		for _, sec := range secrets {
@@ -1454,7 +1489,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 	return nil
 }
 
-func (ops *pxClusterOps) checkAPIService(namespace string) error {
+func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32]int32) error {
 	_, err := ops.k8sOps.GetService(pxAPIServiceName, namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
@@ -1476,19 +1511,19 @@ func (ops *pxClusterOps) checkAPIService(namespace string) error {
 						Name:       "px-api",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9001),
-						TargetPort: intstr.FromInt(9001),
+						TargetPort: intstr.FromInt(int(targetPorts[9001])),
 					},
 					{
 						Name:       "px-sdk",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9020),
-						TargetPort: intstr.FromInt(9020),
+						TargetPort: intstr.FromInt(int(targetPorts[9020])),
 					},
 					{
 						Name:       "px-rest-gateway",
 						Protocol:   corev1.ProtocolTCP,
 						Port:       int32(9021),
-						TargetPort: intstr.FromInt(9021),
+						TargetPort: intstr.FromInt(int(targetPorts[9021])),
 					},
 				},
 			},
@@ -1501,13 +1536,13 @@ func (ops *pxClusterOps) checkAPIService(namespace string) error {
 		logrus.Infof("Successfully created PX API service: [%s] %s", namespace, pxAPIServiceName)
 	} else {
 		// patch it
-		patch := []byte(`{"spec":
+		patch := []byte(fmt.Sprintf(`{"spec":
 						   {"ports":[
-							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":9001},
-							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":9020},
-							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":9021}
+							  {"name":"px-api","port":9001,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-sdk","port":9020,"protocol":"TCP","targetPort":%d},
+							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
-						}}`)
+						}}`, targetPorts[9001], targetPorts[9020], targetPorts[9021]))
 		_, err = ops.k8sOps.PatchService(pxAPIServiceName, namespace, patch)
 		if err != nil {
 			return err

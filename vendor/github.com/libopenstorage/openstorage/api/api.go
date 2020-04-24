@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -8,7 +9,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/ptypes"
-
+	"github.com/libopenstorage/openstorage/pkg/auth"
 	"github.com/mohae/deepcopy"
 )
 
@@ -16,6 +17,8 @@ import (
 const (
 	Name                     = "name"
 	Token                    = "token"
+	TokenSecret              = "token_secret"
+	TokenSecretNamespace     = "token_secret_namespace"
 	SpecNodes                = "nodes"
 	SpecParent               = "parent"
 	SpecEphemeral            = "ephemeral"
@@ -57,6 +60,8 @@ const (
 	// the VolumeSpec.force_unsupported_fs_type. When set to true it asks
 	// the driver to use an unsupported value of VolumeSpec.format if possible
 	SpecForceUnsupportedFsType = "force_unsupported_fs_type"
+	SpecNodiscard              = "nodiscard"
+	StoragePolicy              = "storagepolicy"
 )
 
 // OptionKey specifies a set of recognized query params.
@@ -89,6 +94,8 @@ const (
 	OptCredRegion = "CredRegion"
 	// OptCredDisableSSL indicated if SSL should be disabled
 	OptCredDisableSSL = "CredDisableSSL"
+	// OptCredDisablePathStyle does not enforce path style for s3
+	OptCredDisablePathStyle = "CredDisablePathStyle"
 	// OptCredEndpoint indicate the cloud endpoint
 	OptCredEndpoint = "CredEndpoint"
 	// OptCredAccKey for s3
@@ -107,6 +114,8 @@ const (
 	// OptOptCredAzureAccountKey is the accountkey for
 	// azure as the cloud provider
 	OptCredAzureAccountKey = "CredAccountKey"
+	// Credential ownership key in params
+	OptCredOwnership = "CredOwnership"
 	// OptCloudBackupID is the backID in the cloud
 	OptCloudBackupID = "CloudBackID"
 	// OptSrcVolID is the source volume ID of the backup
@@ -183,6 +192,10 @@ type Node struct {
 	NodeData map[string]interface{}
 	// User defined labels for node. Key Value pairs
 	NodeLabels map[string]string
+	// GossipPort is the port used by the gossip protocol
+	GossipPort string
+	// HWType is the type of the underlying hardware used by the node
+	HWType HardwareType
 }
 
 // FluentDConfig describes ip and port of a fluentdhost.
@@ -192,16 +205,6 @@ type Node struct {
 type FluentDConfig struct {
 	IP   string `json:"ip"`
 	Port string `json:"port"`
-}
-
-// TunnelConfig describes key, cert and endpoint of a reverse proxy tunnel
-// DEPRECATED
-//
-// swagger:model
-type TunnelConfig struct {
-	Key      string `json:"key"`
-	Cert     string `json:"cert"`
-	Endpoint string `json:"tunnel_endpoint"`
 }
 
 // Cluster represents the state of the cluster.
@@ -221,17 +224,11 @@ type Cluster struct {
 	// array of all the nodes in the cluster.
 	Nodes []Node
 
-	// Logging url for the cluster.
-	LoggingURL string
-
 	// Management url for the cluster
 	ManagementURL string
 
 	// FluentD Host for the cluster
 	FluentDConfig FluentDConfig
-
-	// TunnelConfig for the cluster [key, cert, endpoint]
-	TunnelConfig TunnelConfig
 }
 
 // CredCreateRequest is the input for CredCreate command
@@ -273,6 +270,11 @@ type CloudBackupCreateRequest struct {
 	// Labels are list of key value pairs to tag the cloud backup. These labels
 	// are stored in the metadata associated with the backup.
 	Labels map[string]string
+	// FullBackupFrequency indicates number of incremental backup after whcih
+	// a fullbackup must be created. This is to override the default value for
+	// manual/user triggerred backups and not applicable for scheduled backups.
+	// Value of 0 retains the default behavior.
+	FullBackupFrequency uint32
 }
 
 type CloudBackupCreateResponse struct {
@@ -284,9 +286,11 @@ type CloudBackupGroupCreateRequest struct {
 	// GroupID indicates backup request for a volumegroup with this group id
 	GroupID string
 	// Labels indicates backup request for a volume group with these labels
-	// If both GroupID and Labels are specified, volumes matching both
-	// criteria are backed up to cloud
 	Labels map[string]string
+	// VolumeIDs are a list of volume IDs to use for the backup request
+	// If multiple of GroupID, Labels or VolumeIDs are specified, volumes matching all of
+	// them are backed up to cloud
+	VolumeIDs []string
 	// CredentialUUID is cloud credential to be used for backup
 	CredentialUUID string
 	// Full indicates if full backup is desired even though incremental is possible
@@ -309,6 +313,13 @@ type CloudBackupRestoreRequest struct {
 	Name string
 }
 
+type CloudBackupGroupCreateResponse struct {
+	// ID for this group of backups
+	GroupCloudBackupID string
+	// Names of the tasks performing this group backup
+	Names []string
+}
+
 type CloudBackupRestoreResponse struct {
 	// RestoreVolumeID is the volumeID to which the backup is being restored
 	RestoreVolumeID string
@@ -325,6 +336,10 @@ type CloudBackupGenericRequest struct {
 	CredentialUUID string
 	// All if set to true, backups for all clusters in the cloud are processed
 	All bool
+	// StatusFilter indicates backups based on status
+	StatusFilter CloudBackupStatusType
+	// MetadataFilter indicates backups whose metadata has these kv pairs
+	MetadataFilter map[string]string
 }
 
 type CloudBackupInfo struct {
@@ -345,11 +360,17 @@ type CloudBackupInfo struct {
 
 type CloudBackupEnumerateRequest struct {
 	CloudBackupGenericRequest
+	// MaxBackups indicates maxBackups to return in this enumerate list
+	MaxBackups uint64
+	// ContinuationToken returned in the enumerate response if all of the
+	// requested backups could not be returned in one response
+	ContinuationToken string
 }
 
 type CloudBackupEnumerateResponse struct {
 	// Backups is list of backups in cloud for given volume/cluster/s
-	Backups []CloudBackupInfo
+	Backups           []CloudBackupInfo
+	ContinuationToken string
 }
 
 type CloudBackupDeleteRequest struct {
@@ -371,9 +392,17 @@ type CloudBackupStatusRequest struct {
 	// Local indicates if only those backups/restores that are
 	// active on current node must be returned
 	Local bool
-	// Name of the backup/restore task. If this is specified, SrcVolumeID is
-	// ignored
+	// ID of the backup/restore task. If this is specified, SrcVolumeID is
+	// ignored. This could be GroupCloudBackupId too, and in that case multiple
+	// statuses belonging to the groupCloudBackupID is returned.
+	ID string
+}
+
+type CloudBackupStatusRequestOld struct {
+	// Old field for task ID
 	Name string
+	// New structure
+	CloudBackupStatusRequest
 }
 
 type CloudBackupOpType string
@@ -394,6 +423,9 @@ const (
 	CloudBackupStatusActive     = CloudBackupStatusType("Active")
 	CloudBackupStatusQueued     = CloudBackupStatusType("Queued")
 	CloudBackupStatusFailed     = CloudBackupStatusType("Failed")
+	// Invalid includes Failed, Stopped, and Aborted used as filter to enumerate
+	// cloud backups
+	CloudBackupStatusInvalid = CloudBackupStatusType("Invalid")
 )
 
 const (
@@ -428,6 +460,9 @@ type CloudBackupStatus struct {
 	Info []string
 	// CredentialUUID used for this backup/restore op
 	CredentialUUID string
+	// GroupCloudBackupID is valid for backups that were started as part of group
+	// cloudbackup request
+	GroupCloudBackupID string
 }
 
 type CloudBackupStatusResponse struct {
@@ -493,10 +528,21 @@ type CloudBackupScheduleInfo struct {
 	Labels map[string]string
 	// Full indicates if scheduled backups must be full always
 	Full bool
+	// RetentionDays is the number of days that the scheduled backups will be kept
+	// and after these number of days it will be deleted
+	RetentionDays uint32
 }
 
 type CloudBackupSchedCreateRequest struct {
 	CloudBackupScheduleInfo
+}
+
+// Callers must read the existing schedule and modify
+// required fields
+type CloudBackupSchedUpdateRequest struct {
+	CloudBackupScheduleInfo
+	// SchedUUID for which the schedule is being updated
+	SchedUUID string
 }
 
 type CloudBackupGroupSchedCreateRequest struct {
@@ -506,6 +552,10 @@ type CloudBackupGroupSchedCreateRequest struct {
 	// Labels indicates a volume group for which this group cloudsnap schedule is
 	// being created. If this is provided GroupId is not needed and vice-versa.
 	Labels map[string]string
+	// VolumeIDs are a list of volume IDs to use for the backup request
+	// If multiple of GroupID, Labels or VolumeIDs are specified, volumes matching all of
+	// them are backed up to cloud
+	VolumeIDs []string
 	// CredentialUUID is cloud credential to be used with this schedule
 	CredentialUUID string
 	// Schedule is the frequency of backup
@@ -515,6 +565,16 @@ type CloudBackupGroupSchedCreateRequest struct {
 	MaxBackups uint
 	// Full indicates if scheduled backups must be full always
 	Full bool
+	// RetentionDays is the number of days that the scheduled backups will be kept
+	// and after these number of days it will be deleted
+	RetentionDays uint32
+}
+
+type CloudBackupGroupSchedUpdateRequest struct {
+	// Any parameters in this can be updated
+	CloudBackupGroupSchedCreateRequest
+	// UUID of the group schedule being upated
+	SchedUUID string
 }
 
 type CloudBackupSchedCreateResponse struct {
@@ -724,12 +784,6 @@ func (m *Volume) Contains(mid string) bool {
 // Copy makes a deep copy of VolumeSpec
 func (s *VolumeSpec) Copy() *VolumeSpec {
 	spec := *s
-	if s.VolumeLabels != nil {
-		spec.VolumeLabels = make(map[string]string)
-		for k, v := range s.VolumeLabels {
-			spec.VolumeLabels[k] = v
-		}
-	}
 	if s.ReplicaSet != nil {
 		spec.ReplicaSet = &ReplicaSet{Nodes: make([]string, len(s.ReplicaSet.Nodes))}
 		copy(spec.ReplicaSet.Nodes, s.ReplicaSet.Nodes)
@@ -774,11 +828,15 @@ func (s *Node) ToStorageNode() *StorageNode {
 		MgmtIp:            s.MgmtIp,
 		DataIp:            s.DataIp,
 		Hostname:          s.Hostname,
+		HWType:            s.HWType,
 	}
 
 	node.Disks = make(map[string]*StorageResource)
 	for k, v := range s.Disks {
-		node.Disks[k] = &v
+		// need to take the address of a local variable and not of v
+		// since its address does not change
+		vv := v
+		node.Disks[k] = &vv
 	}
 
 	node.NodeLabels = make(map[string]string)
@@ -825,8 +883,39 @@ func CloudBackupStatusTypeToSdkCloudBackupStatusType(
 		return SdkCloudBackupStatusType_SdkCloudBackupStatusTypeActive
 	case CloudBackupStatusFailed:
 		return SdkCloudBackupStatusType_SdkCloudBackupStatusTypeFailed
+	case CloudBackupStatusQueued:
+		return SdkCloudBackupStatusType_SdkCloudBackupStatusTypeQueued
+	case CloudBackupStatusInvalid:
+		return SdkCloudBackupStatusType_SdkCloudBackupStatusTypeInvalid
 	default:
 		return SdkCloudBackupStatusType_SdkCloudBackupStatusTypeUnknown
+	}
+}
+
+func SdkCloudBackupStatusTypeToCloudBackupStatusString(
+	t SdkCloudBackupStatusType,
+) string {
+	switch t {
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeNotStarted:
+		return string(CloudBackupStatusNotStarted)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeDone:
+		return string(CloudBackupStatusDone)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeAborted:
+		return string(CloudBackupStatusAborted)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypePaused:
+		return string(CloudBackupStatusPaused)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeStopped:
+		return string(CloudBackupStatusStopped)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeActive:
+		return string(CloudBackupStatusActive)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeFailed:
+		return string(CloudBackupStatusFailed)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeQueued:
+		return string(CloudBackupStatusQueued)
+	case SdkCloudBackupStatusType_SdkCloudBackupStatusTypeInvalid:
+		return string(CloudBackupStatusInvalid)
+	default:
+		return string(CloudBackupStatusFailed)
 	}
 }
 
@@ -856,7 +945,7 @@ func (r *CloudBackupEnumerateResponse) ToSdkCloudBackupEnumerateWithFiltersRespo
 	for i, v := range r.Backups {
 		resp.Backups[i] = v.ToSdkCloudBackupInfo()
 	}
-
+	resp.ContinuationToken = r.ContinuationToken
 	return resp
 }
 
@@ -873,6 +962,17 @@ func CloudBackupOpTypeToSdkCloudBackupOpType(t CloudBackupOpType) SdkCloudBackup
 
 func StringToSdkCloudBackupOpType(s string) SdkCloudBackupOpType {
 	return CloudBackupOpTypeToSdkCloudBackupOpType(CloudBackupOpType(s))
+}
+
+func SdkCloudBackupOpTypeToCloudBackupOpType(t SdkCloudBackupOpType) CloudBackupOpType {
+	switch t {
+	case SdkCloudBackupOpType_SdkCloudBackupOpTypeBackupOp:
+		return CloudBackupOp
+	case SdkCloudBackupOpType_SdkCloudBackupOpTypeRestoreOp:
+		return CloudRestoreOp
+	default:
+		return CloudBackupOpType("Unknown")
+	}
 }
 
 func (s CloudBackupStatus) ToSdkCloudBackupStatus() *SdkCloudBackupStatus {
@@ -927,4 +1027,135 @@ func (r *CloudBackupHistoryResponse) ToSdkCloudBackupHistoryResponse() *SdkCloud
 	}
 
 	return resp
+}
+
+func (l *VolumeLocator) MergeVolumeSpecLabels(s *VolumeSpec) *VolumeLocator {
+	for k, v := range s.GetVolumeLabels() {
+		l.VolumeLabels[k] = v
+	}
+
+	return l
+}
+
+func (v *Volume) IsPermitted(ctx context.Context, accessType Ownership_AccessType) bool {
+	return v.GetSpec().IsPermitted(ctx, accessType)
+}
+
+func (v *VolumeSpec) IsPermitted(ctx context.Context, accessType Ownership_AccessType) bool {
+	return v.GetOwnership().IsPermittedByContext(ctx, accessType)
+}
+
+func (v *VolumeSpec) IsPermittedFromUserInfo(user *auth.UserInfo, accessType Ownership_AccessType) bool {
+	if v.IsPublic() {
+		return true
+	}
+
+	if v.GetOwnership() != nil {
+		return v.GetOwnership().IsPermitted(user, accessType)
+	}
+	return true
+}
+
+func (v *VolumeSpec) IsPublic() bool {
+	return v.GetOwnership() == nil || v.GetOwnership().IsPublic()
+}
+
+// GetCloneCreatorOwnership returns the appropriate ownership for the
+// new snapshot and if an update is required
+func (v *VolumeSpec) GetCloneCreatorOwnership(ctx context.Context) (*Ownership, bool) {
+	o := v.GetOwnership()
+
+	// If there is user information, then auth is enabled
+	if userinfo, ok := auth.NewUserInfoFromContext(ctx); ok {
+
+		// Check if the owner is the one who cloned it
+		if o != nil && o.IsOwner(userinfo) {
+			return o, false
+		}
+
+		// Not the same owner, we now need new ownership.
+		// This works for public volumes also.
+		return OwnershipSetUsernameFromContext(ctx, nil), true
+	}
+
+	return o, false
+}
+
+// Check access permission of SdkStoragePolicy Objects
+
+func (s *SdkStoragePolicy) IsPermitted(ctx context.Context, accessType Ownership_AccessType) bool {
+	if s.IsPublic() {
+		return true
+	}
+
+	// Storage Policy is not public, check permission
+	if userinfo, ok := auth.NewUserInfoFromContext(ctx); ok {
+		// Check Access
+		return s.IsPermittedFromUserInfo(userinfo, accessType)
+	} else {
+		// There is no user information in the context so
+		// authorization is not running
+		return true
+	}
+}
+
+func (s *SdkStoragePolicy) IsPermittedFromUserInfo(user *auth.UserInfo, accessType Ownership_AccessType) bool {
+	if s.IsPublic() {
+		return true
+	}
+
+	if s.GetOwnership() != nil {
+		return s.GetOwnership().IsPermitted(user, accessType)
+	}
+	return true
+}
+
+func (s *SdkStoragePolicy) IsPublic() bool {
+	return s.GetOwnership() == nil || s.GetOwnership().IsPublic()
+}
+
+func CloudBackupRequestedStateToSdkCloudBackupRequestedState(
+	t string,
+) SdkCloudBackupRequestedState {
+	switch t {
+	case CloudBackupRequestedStateStop:
+		return SdkCloudBackupRequestedState_SdkCloudBackupRequestedStateStop
+	case CloudBackupRequestedStatePause:
+		return SdkCloudBackupRequestedState_SdkCloudBackupRequestedStatePause
+	case CloudBackupRequestedStateResume:
+		return SdkCloudBackupRequestedState_SdkCloudBackupRequestedStateResume
+	default:
+		return SdkCloudBackupRequestedState_SdkCloudBackupRequestedStateUnknown
+	}
+}
+
+// Helpers for volume state action
+func (m *VolumeStateAction) IsAttach() bool {
+	return m.GetAttach() == VolumeActionParam_VOLUME_ACTION_PARAM_ON
+}
+
+func (m *VolumeStateAction) IsDetach() bool {
+	return m.GetAttach() == VolumeActionParam_VOLUME_ACTION_PARAM_OFF
+}
+
+func (m *VolumeStateAction) IsMount() bool {
+	return m.GetMount() == VolumeActionParam_VOLUME_ACTION_PARAM_ON
+}
+
+func (m *VolumeStateAction) IsUnMount() bool {
+	return m.GetMount() == VolumeActionParam_VOLUME_ACTION_PARAM_OFF
+}
+
+// IsAttached checks if a volume is attached
+func (v *Volume) IsAttached() bool {
+	return len(v.AttachedOn) > 0 &&
+		v.State == VolumeState_VOLUME_STATE_ATTACHED &&
+		v.AttachedState != AttachState_ATTACH_STATE_INTERNAL
+}
+
+// TokenSecretContext contains all nessesary information to get a
+// token secret from any provider
+type TokenSecretContext struct {
+	SecretName      string
+	SecretNamespace string
 }
