@@ -112,7 +112,7 @@ func (c *FakeVolumePlacementStrategies) DeleteCollection(options *v1.DeleteOptio
 // Patch applies the patch and returns the patched volumePlacementStrategy.
 func (c *FakeVolumePlacementStrategies) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.VolumePlacementStrategy, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceAction(volumeplacementstrategiesResource, name, data, subresources...), &v1beta1.VolumePlacementStrategy{})
+		Invokes(testing.NewRootPatchSubresourceAction(volumeplacementstrategiesResource, name, types.MergePatchType, data, subresources...), &v1beta1.VolumePlacementStrategy{})
 	if obj == nil {
 		return nil, err
 	}

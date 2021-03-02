@@ -16,7 +16,10 @@ import (
 	"github.com/portworx/kvdb/consul"
 	e2 "github.com/portworx/kvdb/etcd/v2"
 	e3 "github.com/portworx/kvdb/etcd/v3"
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apps"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/rbac"
+	"github.com/portworx/sched-ops/k8s/storage"
 	"github.com/portworx/sched-ops/task"
 	apiv1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/k8sutils"
@@ -150,7 +153,10 @@ const (
 )
 
 type pxClusterOps struct {
-	k8sOps               k8s.Ops
+	coreOps              core.Ops
+	k8sApps              apps.Ops
+	k8sRBAC              rbac.Ops
+	k8sStorage           storage.Ops
 	utils                *k8sutils.Instance
 	dockerRegistrySecret string
 	platform             platformType
@@ -200,17 +206,20 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	if err != nil {
 		return nil, err
 	}
-	k8sOps := k8s.Instance()
+	coreOps := core.Instance()
+	k8sApps := apps.Instance()
+	k8sRBAC := rbac.Instance()
+	k8sStorage := storage.Instance()
 
 	// Detect the installedNamespace
-	namespaces, err := k8sOps.ListNamespaces(map[string]string{})
+	namespaces, err := coreOps.ListNamespaces(map[string]string{})
 	if err != nil {
 		return nil, err
 	}
 
 	installedNamespaces := make([]string, 0)
 	for _, ns := range namespaces.Items {
-		dss, err := k8sOps.ListDaemonSets(ns.ObjectMeta.Name, pxListOpts)
+		dss, err := k8sApps.ListDaemonSets(ns.ObjectMeta.Name, pxListOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -225,7 +234,10 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	}
 
 	return &pxClusterOps{
-		k8sOps:               k8sOps,
+		coreOps:              coreOps,
+		k8sApps:              k8sApps,
+		k8sRBAC:              k8sRBAC,
+		k8sStorage:           k8sStorage,
 		dockerRegistrySecret: dockerRegistrySecret,
 		utils:                utils,
 		installedNamespaces:  installedNamespaces,
@@ -258,7 +270,7 @@ func (ops *pxClusterOps) Upgrade(newSpec *apiv1beta1.Cluster, opts *UpgradeOptio
 	}
 
 	ns := ops.installedNamespaces[0]
-	svc, err := ops.k8sOps.GetService(pxServiceName, ns)
+	svc, err := ops.coreOps.GetService(pxServiceName, ns)
 	if err != nil {
 		return err
 	}
@@ -407,13 +419,13 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached(volDriver volume.Volume
 
 	var volsToInspect []string
 	for _, sc := range scs {
-		pvcs, err := ops.k8sOps.GetPVCsUsingStorageClass(sc)
+		pvcs, err := ops.coreOps.GetPVCsUsingStorageClass(sc)
 		if err != nil {
 			return err
 		}
 
 		for _, pvc := range pvcs {
-			pv, err := ops.k8sOps.GetVolumeForPersistentVolumeClaim(&pvc)
+			pv, err := ops.coreOps.GetVolumeForPersistentVolumeClaim(&pvc)
 			if err != nil {
 				return err
 			}
@@ -471,7 +483,7 @@ func getPXDriver(ip string) (volume.VolumeDriver, cluster.Cluster, error) {
 func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 	pxDaemonsets := make([]apps_api.DaemonSet, 0)
 	for _, ns := range ops.installedNamespaces {
-		dss, err := ops.k8sOps.ListDaemonSets(ns, pxListOpts)
+		dss, err := ops.k8sApps.ListDaemonSets(ns, pxListOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -552,7 +564,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 			},
 		},
 	}
-	_, err = ops.k8sOps.UpdateClusterRole(pxClusterRole)
+	_, err = ops.k8sRBAC.UpdateClusterRole(pxClusterRole)
 	if err != nil {
 		return err
 	}
@@ -611,7 +623,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 				continue
 			}
 
-			updatedDS, err := ops.k8sOps.UpdateDaemonSet(dsCopy)
+			updatedDS, err := ops.k8sApps.UpdateDaemonSet(dsCopy)
 			if err != nil {
 				return nil, true, err
 			}
@@ -631,7 +643,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 		logrus.Infof("Checking upgrade status of PX daemonset: [%s] %s to version: %s", ds.Namespace, ds.Name, newVersion)
 
 		t = func() (interface{}, bool, error) {
-			updatedDS, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
+			updatedDS, err := ops.k8sApps.GetDaemonSet(ds.Name, ds.Namespace)
 			if err != nil {
 				return nil, true, err
 			}
@@ -655,7 +667,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 		}
 
 		logrus.Infof("Doing additional validations of PX daemonset: [%s] %s. timeout: %v", ds.Namespace, ds.Name, daemonsetReadyTimeout)
-		err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
+		err = ops.k8sApps.ValidateDaemonSet(ds.Name, ds.Namespace, daemonsetReadyTimeout)
 		if err != nil {
 			return err
 		}
@@ -671,7 +683,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 		}
 
 		// Check portworx-service and override default target ports
-		pxService, err := ops.k8sOps.GetService(pxServiceName, ds.Namespace)
+		pxService, err := ops.coreOps.GetService(pxServiceName, ds.Namespace)
 		if err != nil {
 			return err
 
@@ -689,7 +701,7 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
 						}}`, targetPorts[9001], targetPorts[9019], targetPorts[9020], targetPorts[9021]))
-		_, err = ops.k8sOps.PatchService(pxServiceName, ds.Namespace, patch)
+		_, err = ops.coreOps.PatchService(pxServiceName, ds.Namespace, patch)
 		if err != nil {
 			return err
 		}
@@ -734,7 +746,11 @@ func getEnv(envVars []corev1.EnvVar, key string) string {
 func (ops *pxClusterOps) updatePxSecretsPermissions() error {
 	// create px namespace to store secrets
 	logrus.Infof("Creating [%s] namespace", pxSecretsNamespace)
-	_, err := ops.k8sOps.CreateNamespace(pxSecretsNamespace, nil)
+	_, err := ops.coreOps.CreateNamespace(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pxSecretsNamespace,
+		},
+	})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
@@ -785,9 +801,10 @@ func (ops *pxClusterOps) updatePxSecretsPermissions() error {
 
 // createOrUpdateRole creates a given role or updates if it already exists
 func (ops *pxClusterOps) createOrUpdateRole(role *rbacv1.Role) error {
-	_, err := ops.k8sOps.CreateRole(role)
+
+	_, err := ops.k8sRBAC.CreateRole(role)
 	if errors.IsAlreadyExists(err) {
-		if _, err = ops.k8sOps.UpdateRole(role); err != nil {
+		if _, err = ops.k8sRBAC.UpdateRole(role); err != nil {
 			return err
 		}
 	}
@@ -796,9 +813,10 @@ func (ops *pxClusterOps) createOrUpdateRole(role *rbacv1.Role) error {
 
 // createOrUpdateRoleBinding creates a given role binding or updates if it already exists
 func (ops *pxClusterOps) createOrUpdateRoleBinding(binding *rbacv1.RoleBinding) error {
-	_, err := ops.k8sOps.CreateRoleBinding(binding)
+
+	_, err := ops.k8sRBAC.CreateRoleBinding(binding)
 	if errors.IsAlreadyExists(err) {
-		if _, err = ops.k8sOps.UpdateRoleBinding(binding); err != nil {
+		if _, err = ops.k8sRBAC.UpdateRoleBinding(binding); err != nil {
 			return err
 		}
 	}
@@ -874,7 +892,7 @@ func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
 	}
 
 	for _, d := range dss {
-		if err = ops.k8sOps.ValidateDaemonSet(d.Name, d.Namespace, 1*time.Minute); err != nil {
+		if err = ops.k8sApps.ValidateDaemonSet(d.Name, d.Namespace, 1*time.Minute); err != nil {
 			return fmt.Errorf("pre-flight check failed as existing Portworx DaemonSet is not ready. err: %v", err)
 		}
 	}
@@ -883,7 +901,7 @@ func (ops *pxClusterOps) preFlightChecks(spec *apiv1beta1.Cluster) error {
 }
 
 func (ops *pxClusterOps) getDaemonSetReadyTimeout(timeoutPerNode int) (time.Duration, error) {
-	nodes, err := ops.k8sOps.GetNodes()
+	nodes, err := ops.coreOps.GetNodes()
 	if err != nil {
 		return 0, err
 	}
@@ -1007,7 +1025,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		ops.installedNamespaces)
 
 	for _, ds := range dss {
-		err = ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		err = ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
 		if err != nil {
 			return err
 		}
@@ -1021,7 +1039,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		csiClusterRole,
 	}
 	for _, role := range clusterRoles {
-		err = ops.k8sOps.DeleteClusterRole(role)
+		err = ops.k8sRBAC.DeleteClusterRole(role)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1035,24 +1053,24 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		csiClusterRoleBinding,
 	}
 	for _, binding := range clusterRoleBindings {
-		err = ops.k8sOps.DeleteClusterRoleBinding(binding)
+		err = ops.k8sRBAC.DeleteClusterRoleBinding(binding)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 	}
 
 	clusterWideSecret := strings.Replace(clusterName+"_px_secret", "_", "-", -1)
-	err = ops.k8sOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
+	err = ops.coreOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
-	err = ops.k8sOps.DeleteStorageClass(storkSnapshotStorageClass)
+	err = ops.k8sStorage.DeleteStorageClass(storkSnapshotStorageClass)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
-	err = ops.k8sOps.DeleteNamespace(pxSecretsNamespace)
+	err = ops.coreOps.DeleteNamespace(pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -1062,7 +1080,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 	}
 	for _, cm := range configMaps {
-		err = ops.k8sOps.DeleteConfigMap(cm, bootstrapCloudDriveNamespace)
+		err = ops.coreOps.DeleteConfigMap(cm, bootstrapCloudDriveNamespace)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1072,7 +1090,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	for _, ns := range ops.installedNamespaces {
 
 		// Delete portworx-api daemonset
-		err = ops.k8sOps.DeleteDaemonSet(pxAPIDaemonset, ns)
+		err = ops.k8sApps.DeleteDaemonSet(pxAPIDaemonset, ns)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1084,7 +1102,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			csiExtDeploymentName,
 		}
 		for _, depName := range depNames {
-			err = ops.k8sOps.DeleteDeployment(depName, ns)
+			err = ops.k8sApps.DeleteDeployment(depName, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1095,18 +1113,17 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			{lhRoleName, ns},
 		}
 		for _, role := range roles {
-			err = ops.k8sOps.DeleteRole(role[0], role[1])
+			err = ops.k8sRBAC.DeleteRole(role[0], role[1])
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
 		}
-
 		roleBindings := [2][2]string{
 			{pxRoleBindingName, pxSecretsNamespace},
 			{lhRoleBindingName, ns},
 		}
 		for _, binding := range roleBindings {
-			err = ops.k8sOps.DeleteRoleBinding(binding[0], binding[1])
+			err = ops.k8sRBAC.DeleteRoleBinding(binding[0], binding[1])
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1121,7 +1138,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			csiAccount,
 		}
 		for _, acc := range accounts {
-			err = ops.k8sOps.DeleteServiceAccount(acc, ns)
+			err = ops.coreOps.DeleteServiceAccount(acc, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1135,7 +1152,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			csiService,
 		}
 		for _, svc := range services {
-			err = ops.k8sOps.DeleteService(svc, ns)
+			err = ops.coreOps.DeleteService(svc, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1146,7 +1163,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 
 		for _, ss := range statefulSets {
-			err = ops.k8sOps.DeleteStatefulSet(ss, ns)
+			err = ops.k8sApps.DeleteStatefulSet(ss, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1158,7 +1175,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 
 		for _, sec := range secrets {
-			err = ops.k8sOps.DeleteSecret(sec, ns)
+			err = ops.coreOps.DeleteSecret(sec, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1173,7 +1190,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 		}
 		for _, cm := range configMaps {
-			err = ops.k8sOps.DeleteConfigMap(cm, ns)
+			err = ops.coreOps.DeleteConfigMap(cm, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1391,13 +1408,14 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 // runDaemonSet runs the given daemonset, attempts to validate if it ran successfully and then
 // deletes it
 func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Duration) error {
-	err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+
+	err := ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
 	t := func() (interface{}, bool, error) {
-		_, err := ops.k8sOps.GetDaemonSet(ds.Name, ds.Namespace)
+		_, err := ops.k8sApps.GetDaemonSet(ds.Name, ds.Namespace)
 		if err == nil {
 			return nil, true, fmt.Errorf("daemonset: [%s] %s is still present", ds.Namespace, ds.Name)
 		}
@@ -1409,7 +1427,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 		return err
 	}
 
-	ds, err = ops.k8sOps.CreateDaemonSet(ds)
+	ds, err = ops.k8sApps.CreateDaemonSet(ds)
 	if err != nil {
 		return err
 	}
@@ -1418,13 +1436,13 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 
 	// Delete the daemonset regardless of status
 	defer func(ds *apps_api.DaemonSet) {
-		err := ops.k8sOps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		err := ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
 		if err != nil && !errors.IsNotFound(err) {
 			logrus.Warnf("error while deleting daemonset: %v", err)
 		}
 	}(ds)
 
-	err = ops.k8sOps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
+	err = ops.k8sApps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
 	if err != nil {
 		return err
 	}
@@ -1435,7 +1453,8 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 }
 
 func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affinity) error {
-	_, err := ops.k8sOps.GetDaemonSet(pxAPIDaemonset, namespace)
+
+	_, err := ops.k8sApps.GetDaemonSet(pxAPIDaemonset, namespace)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -1483,7 +1502,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 			},
 		}
 
-		_, err = ops.k8sOps.CreateDaemonSet(apiDS)
+		_, err = ops.k8sApps.CreateDaemonSet(apiDS)
 		if err != nil {
 			return err
 		}
@@ -1495,7 +1514,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 }
 
 func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32]int32) error {
-	_, err := ops.k8sOps.GetService(pxAPIServiceName, namespace)
+	_, err := ops.coreOps.GetService(pxAPIServiceName, namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -1534,7 +1553,7 @@ func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32
 			},
 		}
 
-		_, err = ops.k8sOps.CreateService(apiService)
+		_, err = ops.coreOps.CreateService(apiService)
 		if err != nil {
 			return err
 		}
@@ -1548,7 +1567,7 @@ func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32
 							  {"name":"px-rest-gateway","port":9021,"protocol":"TCP","targetPort":%d}
 							]
 						}}`, targetPorts[9001], targetPorts[9020], targetPorts[9021]))
-		_, err = ops.k8sOps.PatchService(pxAPIServiceName, namespace, patch)
+		_, err = ops.coreOps.PatchService(pxAPIServiceName, namespace, patch)
 		if err != nil {
 			return err
 		}
