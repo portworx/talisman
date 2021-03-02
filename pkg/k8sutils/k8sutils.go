@@ -2,12 +2,15 @@
 package k8sutils
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/portworx/sched-ops/k8s"
+	"github.com/portworx/sched-ops/k8s/apps"
+	"github.com/portworx/sched-ops/k8s/core"
+	"github.com/portworx/sched-ops/k8s/storage"
 	"github.com/portworx/sched-ops/task"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1"
@@ -31,7 +34,7 @@ const (
 // Instance represents an instance of k8sutils
 type Instance struct {
 	kubeClient kubernetes.Interface
-	k8sOps     k8s.Ops
+	k8sOps     core.Ops
 }
 
 // New returns a new instance of k8sutils
@@ -62,7 +65,7 @@ func New(kubeconfig string) (*Instance, error) {
 
 	return &Instance{
 		kubeClient: kubeClient,
-		k8sOps:     k8s.Instance(),
+		k8sOps:     core.Instance(),
 	}, nil
 }
 
@@ -73,10 +76,11 @@ func (k *Instance) GetPXSharedApps() ([]apps_api.Deployment, []apps_api.Stateful
 		return nil, nil, err
 	}
 
+	appsOps := apps.Instance()
 	var sharedDeps []apps_api.Deployment
 	var sharedSS []apps_api.StatefulSet
 	for _, sc := range scs {
-		deps, err := k.k8sOps.GetDeploymentsUsingStorageClass(sc)
+		deps, err := appsOps.GetDeploymentsUsingStorageClass(sc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -85,7 +89,7 @@ func (k *Instance) GetPXSharedApps() ([]apps_api.Deployment, []apps_api.Stateful
 			sharedDeps = append(sharedDeps, d)
 		}
 
-		ss, err := k.k8sOps.GetStatefulSetsUsingStorageClass(sc)
+		ss, err := appsOps.GetStatefulSetsUsingStorageClass(sc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -126,14 +130,15 @@ func (k *Instance) IsAnyPXAppPodUnmanaged() (bool, error) {
 
 // GetPXSharedSCs returns all storage classes that have the shared parameter set to true
 func (k *Instance) GetPXSharedSCs() ([]string, error) {
-	scs, err := k.kubeClient.StorageV1().StorageClasses().List(metav1.ListOptions{})
+	scs, err := k.kubeClient.StorageV1().StorageClasses().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 
+	storageOps := storage.Instance()
 	var retList []string
 	for _, sc := range scs.Items {
-		params, err := k.k8sOps.GetStorageClassParams(&sc)
+		params, err := storageOps.GetStorageClassParams(&sc)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +168,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 		logrus.Infof("scaling down deployment: [%s] %s", deploymentNamespace, deploymentName)
 
 		t := func() (interface{}, bool, error) {
-			dCopy, err := k.kubeClient.AppsV1().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
+			dCopy, err := k.kubeClient.AppsV1().Deployments(deploymentNamespace).Get(context.TODO(), deploymentName, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					return nil, false, nil // done as deployment is deleted
@@ -183,7 +188,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 			dCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *dCopy.Spec.Replicas)
 			dCopy.Spec.Replicas = &valZero
 
-			_, err = k.kubeClient.AppsV1().Deployments(dCopy.Namespace).Update(dCopy)
+			_, err = k.kubeClient.AppsV1().Deployments(dCopy.Namespace).Update(context.TODO(), dCopy, metav1.UpdateOptions{})
 			if err != nil {
 				return nil, true, err
 			}
@@ -200,7 +205,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 		logrus.Infof("scaling down statefulset: [%s] %s", s.Namespace, s.Name)
 
 		t := func() (interface{}, bool, error) {
-			sCopy, err := k.kubeClient.AppsV1().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
+			sCopy, err := k.kubeClient.AppsV1().StatefulSets(s.Namespace).Get(context.TODO(), s.Name, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					return nil, false, nil // done as statefulset is deleted
@@ -214,7 +219,7 @@ func (k *Instance) ScaleSharedAppsToZero() error {
 			sCopy.Annotations[replicaMemoryKey] = fmt.Sprintf("%d", *sCopy.Spec.Replicas)
 			sCopy.Spec.Replicas = &valZero
 
-			_, err = k.kubeClient.AppsV1().StatefulSets(sCopy.Namespace).Update(sCopy)
+			_, err = k.kubeClient.AppsV1().StatefulSets(sCopy.Namespace).Update(context.TODO(), sCopy, metav1.UpdateOptions{})
 			if err != nil {
 				return nil, true, err
 			}
@@ -244,7 +249,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 		deploymentNamespace := d.Namespace
 		logrus.Infof("restoring app: [%s] %s", d.Namespace, d.Name)
 		t := func() (interface{}, bool, error) {
-			dCopy, err := k.kubeClient.AppsV1().Deployments(deploymentNamespace).Get(deploymentName, metav1.GetOptions{})
+			dCopy, err := k.kubeClient.AppsV1().Deployments(deploymentNamespace).Get(context.TODO(), deploymentName, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					return nil, false, nil // done as deployment is deleted
@@ -272,7 +277,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 			delete(dCopy.Annotations, replicaMemoryKey)
 			dCopy.Spec.Replicas = &parsedVal.IntVal
 
-			_, err = k.kubeClient.AppsV1().Deployments(dCopy.Namespace).Update(dCopy)
+			_, err = k.kubeClient.AppsV1().Deployments(dCopy.Namespace).Update(context.TODO(), dCopy, metav1.UpdateOptions{})
 			if err != nil {
 				return nil, true, err
 			}
@@ -289,7 +294,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 		logrus.Infof("restoring app: [%s] %s", s.Namespace, s.Name)
 
 		t := func() (interface{}, bool, error) {
-			sCopy, err := k.kubeClient.AppsV1().StatefulSets(s.Namespace).Get(s.Name, metav1.GetOptions{})
+			sCopy, err := k.kubeClient.AppsV1().StatefulSets(s.Namespace).Get(context.TODO(), s.Name, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
 					return nil, false, nil // done as statefulset is deleted
@@ -316,7 +321,7 @@ func (k *Instance) RestoreScaledAppsReplicas() error {
 			delete(sCopy.Annotations, replicaMemoryKey)
 			sCopy.Spec.Replicas = &parsedVal.IntVal
 
-			_, err = k.kubeClient.AppsV1().StatefulSets(sCopy.Namespace).Update(sCopy)
+			_, err = k.kubeClient.AppsV1().StatefulSets(sCopy.Namespace).Update(context.TODO(), sCopy, metav1.UpdateOptions{})
 			if err != nil {
 				return nil, true, err
 			}
