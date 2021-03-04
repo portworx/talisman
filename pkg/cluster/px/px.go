@@ -52,6 +52,7 @@ const (
 	changeCauseAnnotation  = "kubernetes.io/change-cause"
 	pxEnableLabelKey       = "px/enabled"
 	dsOptPwxVolumeName     = "optpwx"
+	dsSockPwxVolumeName    = "sockpwx"
 	dsEtcPwxVolumeName     = "etcpwx"
 	dsDbusVolumeName       = "dbus"
 	dsSysdVolumeName       = "sysdmount"
@@ -71,6 +72,7 @@ const (
 	pksPersistentStoreRoot = "/var/vcap/store"
 	pxOptPwx               = "/opt/pwx"
 	pxEtcdPwx              = "/etc/pwx"
+	pxSockPwx              = "/var/lib/osd/driver"
 )
 
 type platformType string
@@ -1268,6 +1270,10 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 									MountPath: pxOptPwx,
 								},
 								{
+									Name:      dsSockPwxVolumeName,
+									MountPath: pxSockPwx,
+								},
+								{
 									Name:      dsDbusVolumeName,
 									MountPath: dbusPath,
 								},
@@ -1327,6 +1333,14 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 							VolumeSource: corev1.VolumeSource{
 								HostPath: &corev1.HostPathVolumeSource{
 									Path: pwxHostPathRoot + pxOptPwx,
+								},
+							},
+						},
+						{
+							Name: dsSockPwxVolumeName,
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: pwxHostPathRoot + pxSockPwx,
 								},
 							},
 						},
