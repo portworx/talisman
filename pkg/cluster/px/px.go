@@ -960,8 +960,10 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() (
 	}
 
 	affinity := ds.Spec.Template.Spec.Affinity
-	for _, c := range ds.Spec.Template.Spec.Containers {
+	pxContainerIdx := 0
+	for i, c := range ds.Spec.Template.Spec.Containers {
 		if c.Name == pxDaemonsetContainerName {
+			pxContainerIdx = i
 			for i, arg := range c.Args {
 				// Reference : https://docs.portworx.com/scheduler/kubernetes/px-k8s-spec-curl.html
 				switch arg {
@@ -974,9 +976,9 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() (
 					if err != nil {
 						return nil, nil, clusterName, platform, affinity, err
 					}
-				case "-pwd":
+				case "-pwd", "-userpwd":
 					parts := strings.Split(c.Args[i+1], ":")
-					if len(parts) != 0 {
+					if len(parts) < 2 {
 						return nil, nil, clusterName, platform, affinity, fmt.Errorf("failed to parse kvdb username and password: %s", c.Args[i+1])
 					}
 					opts[kvdb.UsernameKey] = parts[0]
@@ -998,6 +1000,11 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() (
 		}
 	}
 
+	if opts[kvdb.UsernameKey] != "" && opts[kvdb.UsernameKey][0] == '$' {
+		opts[kvdb.UsernameKey] = ops.extractEnv(opts[kvdb.UsernameKey], ds.Spec.Template.Spec.Containers[pxContainerIdx].Env, ds.Namespace)
+		opts[kvdb.PasswordKey] = ops.extractEnv(opts[kvdb.PasswordKey], ds.Spec.Template.Spec.Containers[pxContainerIdx].Env, ds.Namespace)
+	}
+
 	if usingInternalEtcd {
 		return endpoints, opts, clusterName, platform, affinity, errUsingInternalEtcd
 	}
@@ -1013,6 +1020,32 @@ func (ops *pxClusterOps) parseConfigFromDaemonset() (
 	}
 
 	return endpoints, opts, clusterName, platform, affinity, nil
+}
+
+func (ops *pxClusterOps) extractEnv(varName string, specEnv []v1.EnvVar, namespace string) string {
+	if len(varName) < 2 || varName[0] != '$' {
+		return varName
+	}
+	look4 := varName[1:] // skip '^$'
+	for _, v := range specEnv {
+		if v.Name != look4 {
+			continue
+		}
+		// if value defined, return immediately
+		if v.Value != "" {
+			return v.Value
+		}
+		// else.. let's dig through EnvSource
+		if v.ValueFrom != nil && v.ValueFrom.SecretKeyRef != nil {
+			val, err := ops.utils.GetSecret(v.ValueFrom.SecretKeyRef, namespace)
+			if err != nil {
+				logrus.WithError(err).Errorf("Could not extract %q secret", v.ValueFrom.SecretKeyRef)
+				return varName
+			}
+			return string(val)
+		}
+	}
+	return varName
 }
 
 func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
