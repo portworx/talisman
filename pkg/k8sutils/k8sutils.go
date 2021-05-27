@@ -400,3 +400,15 @@ func (k *Instance) isPodUsingPxVolume(pod core_api.Pod) (bool, error) {
 	}
 	return false, nil
 }
+
+// GetSecret returns the secret subkey
+func (k *Instance) GetSecret(sel *core_api.SecretKeySelector, namespace string) ([]byte, error) {
+	if sel == nil {
+		return nil, nil
+	}
+	sec, err := k.k8sOps.GetSecret(sel.Name, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return sec.Data[sel.Key], nil
+}
