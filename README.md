@@ -1,6 +1,6 @@
 ![logo](doc/media/k8s-porx.png?raw=true "Portworx Operator")
 
-[![Travis branch](https://img.shields.io/travis/portworx/talisman/master.svg)](https://travis-ci.org/portworx/talisman)
+[![Travis branch](https://img.shields.io/travis/portworx/talisman/master.svg)](https://api.travis-ci.com/portworx/talisman.svg?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/portworx/talisman)](https://goreportcard.com/report/github.com/portworx/talisman)
 [![GitHub release](https://img.shields.io/github/release/portworx/talisman/all.svg?style=flat-square)](https://github.com/portworx/talisman/releases)
 
