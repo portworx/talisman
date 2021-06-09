@@ -6,7 +6,8 @@ STATUS_FILE=/tmp/px-node-wipe-done
 ETCPWX=/etc/pwx
 OPTPWX=/opt/pwx
 HOSTPROC1_NS=/hostproc/1/ns
-PXCTL=/opt/pwx/bin/pxctl
+PXCTLNM=pxctl
+PXCTL=/opt/pwx/bin/${PXCTLNM}
 
 rm -rf $STATUS_FILE
 
@@ -98,8 +99,13 @@ run_with_nsenter "umount $OPTPWX/oci" true
 if [ ! -f "$PXCTL" ]; then
   echo "warning: path $PXCTL doesn't exist. Skipping $PXCTL sv node-wipe --all"
 elif [ "$REMOVE_DATA" = "1" ]; then
-  "$PXCTL" sv node-wipe --all || \
-    fatal "error: node wipe failed with code: $?"
+  # Nodewipe needs to be run on the host if poxxible cause multipath check issues.
+  echo "Running pxctl nodewipe on the host's proc/1 namespace"
+  nsenter --mount=$HOSTPROC1_NS/mnt -- "$PXCTLNM" sv node-wipe --all
+  if [ "$?" -ne "0" ]; then
+      "$PXCTL" sv node-wipe --all || \
+	  fatal "error: node wipe failed with code: $?"
+  fi
 else
   echo "-removedata argument not specified. Not wiping the drives"
 fi
