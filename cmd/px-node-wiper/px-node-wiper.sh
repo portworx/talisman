@@ -110,6 +110,18 @@ else
   echo "-removedata argument not specified. Not wiping the drives"
 fi
 
+# Last check to see there are left over oci mounts
+MOUNTS=$(nsenter --mount=$HOSTPROC1_NS/mnt -- mount)
+if [ $? -eq 0 ]; then
+    echo  "${MOUNTS}" |  while IFS= read -r line; do
+	MPOINT=$(echo "${line}" | awk '{ print $3 }' | egrep 'pwx/oci');
+	if [ $? -eq 0 ]; then
+	    echo "Removing left over mount: ${MPOINT}"
+	    nsenter --mount=$HOSTPROC1_NS/mnt -- umount ${MPOINT}
+	fi
+    done
+fi
+
 # Remove binary files
 run_with_nsenter "rm -fr $OPTPWX" false
 
