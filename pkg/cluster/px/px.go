@@ -125,7 +125,7 @@ const (
 	bootstrapCloudDriveNamespace    = "kube-system"
 	internalEtcdConfigMapPrefix     = "px-bootstrap-"
 	cloudDriveConfigMapPrefix       = "px-cloud-drive-"
-	pureCloudDriveConfigMapPrefix   = "px-pure-cloud-drive"
+	pureCloudDriveConfigMap         = "px-pure-cloud-drive"
 	pvcControllerClusterRole        = "portworx-pvc-controller-role"
 	pvcControllerClusterRoleBinding = "portworx-pvc-controller-role-binding"
 	pvcControllerServiceAccount     = "portworx-pvc-controller-account"
@@ -1229,7 +1229,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 
 		configMaps = []string{
-			pureCloudDriveConfigMapPrefix,
+			pureCloudDriveConfigMap,
 			lhConfigMap,
 			storkControllerConfigMap,
 			// below 2 are currently only in the kube-system namespace. keeping them here
