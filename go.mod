@@ -21,9 +21,11 @@ require (
 )
 
 replace (
-	github.com/kubernetes-incubator/external-storage => github.com/libopenstorage/external-storage v5.1.1-0.20190919185747-9394ee8dd536+incompatible
+	github.com/kubernetes-incubator/external-storage => github.com/libopenstorage/external-storage v5.1.1-0.20211117214128-ec0a73271457+incompatible
 	google.golang.org/grpc => google.golang.org/grpc v1.29.1
-	google.golang.org/grpc/examples/helloworld/helloworld => google.golang.org/grpc/examples/helloworld/helloworld v1.29.1
+
+	// Replacing k8s.io dependencies is required if a dependency or any dependency of a dependency
+	// depends on k8s.io/kubernetes. See https://github.com/kubernetes/kubernetes/issues/79384#issuecomment-505725449
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.20.4
 	k8s.io/client-go => k8s.io/client-go v0.20.4
 )
