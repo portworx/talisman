@@ -527,17 +527,32 @@ func (ops *pxClusterOps) upgradePX(spec apiv1beta1.ClusterSpec, opts *UpgradeOpt
 			{
 				APIGroups: []string{""},
 				Resources: []string{"persistentvolumeclaims", "persistentvolumes"},
+				Verbs:     []string{"get", "list", "create", "delete", "update"},
+			},
+			{
+				APIGroups: []string{"storage.k8s.io"},
+				Resources: []string{"storageclasses", "csinodes"},
 				Verbs:     []string{"get", "list"},
 			},
 			{
 				APIGroups: []string{"storage.k8s.io"},
-				Resources: []string{"storageclasses"},
-				Verbs:     []string{"get", "list"},
+				Resources: []string{"volumeattachments"},
+				Verbs:     []string{"get", "list", "create", "delete", "update"},
 			},
 			{
 				APIGroups: []string{""},
 				Resources: []string{"configmaps"},
 				Verbs:     []string{"get", "update", "list", "create"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"services"},
+				Verbs:     []string{"get", "list", "create", "update", "delete"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"endpoints"},
+				Verbs:     []string{"get", "list", "create", "update", "delete"},
 			},
 			{
 				APIGroups:     []string{"extensions"},
