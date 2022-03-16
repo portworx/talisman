@@ -11,7 +11,7 @@ before_install:
 script:
   - make docker-build
 after_success:
-  - if [ "${TRAVIS_BRANCH}" == "master" ] && [ "${TRAVIS_PULL_REQUEST}" == "false" ]; then
+  - if [ "${TRAVIS_PULL_REQUEST}" == "false" ]; then
       echo "${DOCKER_PASS}" | docker login -u="${DOCKER_USER}" --password-stdin;
       make deploy;
     fi
