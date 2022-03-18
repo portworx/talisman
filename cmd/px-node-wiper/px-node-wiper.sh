@@ -88,9 +88,21 @@ run_with_nsenter "systemctl disable portworx" true
 systemctl stop portworx || true
 systemctl disable portworx || true
 
+DBUS_ADDR=/var/run/dbus/system_bus_socket
+if [ -e ${DBUS_ADDR} ]; then
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user stop portworx || true
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user disable portworx || true
+fi
+
 rm -rf /etc/systemd/system/*portworx*
 run_with_nsenter "systemctl daemon-reload" true
+
+# the nsenter approach above doesn't seem to work on coreos machines. To cover all scenarios,
+# try systemctl directly and ignore if it fails. This works on coreos.
 systemctl daemon-reload
+if [ -e ${DBUS_ADDR} ]; then
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user daemon-reload || true
+fi
 
 # unmount oci
 run_with_nsenter "umount $OPTPWX/oci" true
