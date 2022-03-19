@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -x
+
 WAIT=0 # 0 means don't wait. Run to completion.
 REMOVE_DATA=0 #0 means do not delete data
 STATUS_FILE=/tmp/px-node-wipe-done
@@ -11,6 +13,8 @@ PXCTL=/opt/pwx/bin/${PXCTLNM}
 
 rm -rf $STATUS_FILE
 
+DBUS_ADDR=/var/run/dbus/system_bus_socket
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}"
 
 fatal() {
     echo "" 2>&1
@@ -88,10 +92,9 @@ run_with_nsenter "systemctl disable portworx" true
 systemctl stop portworx || true
 systemctl disable portworx || true
 
-DBUS_ADDR=/var/run/dbus/system_bus_socket
 if [ -e ${DBUS_ADDR} ]; then
-    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user stop portworx || true
-    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user disable portworx || true
+    /bin/systemctl --user stop portworx || true
+    /bin/systemctl --user disable portworx || true
 fi
 
 rm -rf /etc/systemd/system/*portworx*
@@ -101,7 +104,7 @@ run_with_nsenter "systemctl daemon-reload" true
 # try systemctl directly and ignore if it fails. This works on coreos.
 systemctl daemon-reload
 if [ -e ${DBUS_ADDR} ]; then
-    DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}" /bin/systemctl --user daemon-reload || true
+    /bin/systemctl --user daemon-reload || true
 fi
 
 # unmount oci
