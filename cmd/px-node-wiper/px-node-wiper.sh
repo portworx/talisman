@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -x
+
 WAIT=0 # 0 means don't wait. Run to completion.
 REMOVE_DATA=0 #0 means do not delete data
 STATUS_FILE=/tmp/px-node-wipe-done
@@ -11,6 +13,8 @@ PXCTL=/opt/pwx/bin/${PXCTLNM}
 
 rm -rf $STATUS_FILE
 
+DBUS_ADDR=/var/run/dbus/system_bus_socket
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}"
 
 fatal() {
     echo "" 2>&1
@@ -88,9 +92,20 @@ run_with_nsenter "systemctl disable portworx" true
 systemctl stop portworx || true
 systemctl disable portworx || true
 
+if [ -e ${DBUS_ADDR} ]; then
+    /bin/systemctl --user stop portworx || true
+    /bin/systemctl --user disable portworx || true
+fi
+
 rm -rf /etc/systemd/system/*portworx*
 run_with_nsenter "systemctl daemon-reload" true
+
+# the nsenter approach above doesn't seem to work on coreos machines. To cover all scenarios,
+# try systemctl directly and ignore if it fails. This works on coreos.
 systemctl daemon-reload
+if [ -e ${DBUS_ADDR} ]; then
+    /bin/systemctl --user daemon-reload || true
+fi
 
 # unmount oci
 run_with_nsenter "umount $OPTPWX/oci" true
