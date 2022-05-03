@@ -16,7 +16,7 @@ require (
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b
 	k8s.io/api v0.20.4
 	k8s.io/apiextensions-apiserver v0.20.4
-	k8s.io/apimachinery v0.20.4
+	k8s.io/apimachinery v0.23.5
 	k8s.io/client-go v12.0.0+incompatible
 )
 
