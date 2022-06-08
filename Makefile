@@ -59,6 +59,15 @@ GOFMT := gofmt
 
 .DEFAULT: all
 
+vendor-tidy:
+	go mod tidy
+
+vendor-update:
+	go mod download
+
+vendor:
+	go mod vendor
+
 all: clean pretest talisman
 
 # print the version

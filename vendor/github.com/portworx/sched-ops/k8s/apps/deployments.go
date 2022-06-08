@@ -21,7 +21,7 @@ type DeploymentOps interface {
 	// GetDeployment returns a deployment for the give name and namespace
 	GetDeployment(name, namespace string) (*appsv1.Deployment, error)
 	// CreateDeployment creates the given deployment
-	CreateDeployment(*appsv1.Deployment) (*appsv1.Deployment, error)
+	CreateDeployment(*appsv1.Deployment, metav1.CreateOptions) (*appsv1.Deployment, error)
 	// UpdateDeployment updates the given deployment
 	UpdateDeployment(*appsv1.Deployment) (*appsv1.Deployment, error)
 	// DeleteDeployment deletes the given deployment
@@ -36,6 +36,8 @@ type DeploymentOps interface {
 	DescribeDeployment(name, namespace string) (*appsv1.DeploymentStatus, error)
 	// GetDeploymentsUsingStorageClass returns all deployments using the given storage class
 	GetDeploymentsUsingStorageClass(scName string) ([]appsv1.Deployment, error)
+	// DeleteDeploymentPods deletes pods for the given deployment name and namespace
+	DeleteDeploymentPods(name, namespace string, timeout time.Duration) error
 }
 
 // ListDeployments lists all deployments for the given namespace
@@ -57,7 +59,7 @@ func (c *Client) GetDeployment(name, namespace string) (*appsv1.Deployment, erro
 }
 
 // CreateDeployment creates the given deployment
-func (c *Client) CreateDeployment(deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
+func (c *Client) CreateDeployment(deployment *appsv1.Deployment, opts metav1.CreateOptions) (*appsv1.Deployment, error) {
 	if err := c.initClient(); err != nil {
 		return nil, err
 	}
@@ -67,7 +69,7 @@ func (c *Client) CreateDeployment(deployment *appsv1.Deployment) (*appsv1.Deploy
 		ns = corev1.NamespaceDefault
 	}
 
-	return c.apps.Deployments(ns).Create(context.TODO(), deployment, metav1.CreateOptions{})
+	return c.apps.Deployments(ns).Create(context.TODO(), deployment, opts)
 }
 
 // DeleteDeployment deletes the given deployment
@@ -292,4 +294,34 @@ func (c *Client) GetDeploymentsUsingStorageClass(scName string) ([]appsv1.Deploy
 	}
 
 	return retList, nil
+}
+
+// DeleteDeploymentPods deletes pods for the given deployment name and namespace
+func (c *Client) DeleteDeploymentPods(name, namespace string, timeout time.Duration) error {
+	deployment, err := c.GetDeployment(name, namespace)
+	if err != nil {
+		return err
+	}
+
+	pods, err := c.GetDeploymentPods(deployment)
+	if err != nil {
+		return err
+	}
+
+	var podsNamesToDelete []string
+	var podsToDelete []corev1.Pod
+	for _, pod := range pods {
+		podsNamesToDelete = append(podsNamesToDelete, pod.Name)
+		podsToDelete = append(podsToDelete, pod)
+	}
+
+	if err := common.DeletePods(c.core, pods, false); err != nil {
+		return err
+	}
+
+	if err := common.WaitForPodsToBeDeleted(c.core, podsToDelete, timeout); err != nil {
+		return fmt.Errorf("Failed to wait for pods to be deleted: %s, Err: %v", podsNamesToDelete, err)
+	}
+
+	return nil
 }

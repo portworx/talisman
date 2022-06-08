@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/libopenstorage/openstorage/api"
@@ -23,11 +24,17 @@ const (
 
 type volumeClient struct {
 	volume.IODriver
+	volume.FilesystemTrimDriver
+	volume.FilesystemCheckDriver
 	c *client.Client
 }
 
 func newVolumeClient(c *client.Client) volume.VolumeDriver {
-	return &volumeClient{volume.IONotSupported, c}
+	return &volumeClient{
+		IODriver:              volume.IONotSupported,
+		FilesystemTrimDriver:  volume.FilesystemTrimNotSupported,
+		FilesystemCheckDriver: volume.FilesystemCheckNotSupported,
+		c:                     c}
 }
 
 // String description of this driver.
@@ -283,6 +290,14 @@ func (v *volumeClient) CapacityUsage(
 	return requests, nil
 }
 
+func (v *volumeClient) VolumeUsageByNode(
+	nodeID string,
+) (*api.VolumeUsageByNode, error) {
+
+	return nil, volume.ErrNotSupported
+
+}
+
 // Shutdown and cleanup.
 func (v *volumeClient) Shutdown() {}
 
@@ -503,7 +518,21 @@ func (v *volumeClient) CredsDelete(uuid string) error {
 // CredsValidate validates the credential by accessuing the cloud
 // provider with the given credential
 func (v *volumeClient) CredsValidate(uuid string) error {
-	req := v.c.Put().Resource(api.OsdCredsPath + "/validate").Instance(uuid)
+	req := v.c.Put().Resource(api.OsdCredsPath + "/validate").Instance(url.QueryEscape(uuid))
+	response := req.Do()
+	if response.Error() != nil {
+		if response.StatusCode() == http.StatusUnprocessableEntity {
+			return volume.NewCredentialError(response.Error().Error())
+		}
+		return response.FormatError()
+	}
+	return nil
+}
+
+// CredsRemoveReferences removes any references the  credential specified
+// by the Name/Uuid
+func (v *volumeClient) CredsDeleteReferences(uuid string) error {
+	req := v.c.Delete().Resource(api.OsdCredsPath + "/references").Instance(uuid)
 	response := req.Do()
 	if response.Error() != nil {
 		if response.StatusCode() == http.StatusUnprocessableEntity {
@@ -770,13 +799,21 @@ func (v *volumeClient) CloudBackupSchedEnumerate() (*api.CloudBackupSchedEnumera
 	return enumerateResponse, nil
 }
 
-func (v *volumeClient) SnapshotGroup(groupID string, labels map[string]string, volumeIDs []string) (*api.GroupSnapCreateResponse, error) {
+func (v *volumeClient) CloudBackupSize(
+	input *api.SdkCloudBackupSizeRequest,
+) (*api.SdkCloudBackupSizeResponse, error) {
+
+	return nil, volume.ErrNotSupported
+}
+
+func (v *volumeClient) SnapshotGroup(groupID string, labels map[string]string, volumeIDs []string, deleteOnFailure bool) (*api.GroupSnapCreateResponse, error) {
 
 	response := &api.GroupSnapCreateResponse{}
 	request := &api.GroupSnapCreateRequest{
-		Id:        groupID,
-		Labels:    labels,
-		VolumeIds: volumeIDs,
+		Id:              groupID,
+		Labels:          labels,
+		VolumeIds:       volumeIDs,
+		DeleteOnFailure: deleteOnFailure,
 	}
 
 	req := v.c.Post().Resource(snapPath + "/snapshotgroup").Body(request)
@@ -842,4 +879,13 @@ func (v *volumeClient) Catalog(id, subfolder, maxDepth string) (api.CatalogRespo
 	}
 
 	return catalog, nil
+}
+
+func (v *volumeClient) VolService(volumeID string, vsreq *api.VolumeServiceRequest) (*api.VolumeServiceResponse, error) {
+	vsresp := &api.VolumeServiceResponse{}
+
+	req := v.c.Post().Resource(volumePath + "/volservice").Instance(volumeID).Body(vsreq)
+	err := req.Do().Unmarshal(&vsresp)
+
+	return vsresp, err
 }
