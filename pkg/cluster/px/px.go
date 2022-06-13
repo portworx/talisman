@@ -13,7 +13,6 @@ import (
 	"github.com/libopenstorage/openstorage/cluster"
 	"github.com/libopenstorage/openstorage/volume"
 	"github.com/portworx/kvdb"
-	"github.com/portworx/kvdb/consul"
 	e2 "github.com/portworx/kvdb/etcd/v2"
 	e3 "github.com/portworx/kvdb/etcd/v3"
 	"github.com/portworx/sched-ops/k8s/apps"
@@ -125,6 +124,8 @@ const (
 	bootstrapCloudDriveNamespace    = "kube-system"
 	internalEtcdConfigMapPrefix     = "px-bootstrap-"
 	cloudDriveConfigMapPrefix       = "px-cloud-drive-"
+	pxBringupQueueConfigMapPrefix   = "px-bringup-queue-lock"
+	pxAttachDrivesetConfigMap       = "px-attach-driveset-lock"
 	pureCloudDriveConfigMap         = "px-pure-cloud-drive"
 	pvcControllerClusterRole        = "portworx-pvc-controller-role"
 	pvcControllerClusterRoleBinding = "portworx-pvc-controller-role-binding"
@@ -1247,11 +1248,22 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			pureCloudDriveConfigMap,
 			lhConfigMap,
 			storkControllerConfigMap,
+			pxAttachDrivesetConfigMap,
 			// below 2 are currently only in the kube-system namespace. keeping them here
 			// in case the behavior changes
 			fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
 			fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 		}
+
+		// Get per zone cloud drive attach driveset config maps
+		cms, err := ops.coreOps.ListConfigMap(ns, metav1.ListOptions{})
+		for _, cm := range cms.Items {
+			if strings.HasPrefix(cm.Name, pxAttachDrivesetConfigMap) ||
+				strings.HasPrefix(cm.Name, pxBringupQueueConfigMapPrefix) {
+				configMaps = append(configMaps, cm.Name)
+			}
+		}
+
 		for _, cm := range configMaps {
 			err = ops.coreOps.DeleteConfigMap(cm, ns)
 			if err != nil && !errors.IsNotFound(err) {
@@ -1502,7 +1514,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 		return err
 	}
 
-	ds, err = ops.k8sApps.CreateDaemonSet(ds)
+	ds, err = ops.k8sApps.CreateDaemonSet(ds, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -1577,7 +1589,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 			},
 		}
 
-		_, err = ops.k8sApps.CreateDaemonSet(apiDS)
+		_, err = ops.k8sApps.CreateDaemonSet(apiDS, metav1.CreateOptions{})
 		if err != nil {
 			return err
 		}
@@ -1672,8 +1684,6 @@ func getKVDBClient(endpoints []string, opts map[string]string) (kvdb.Kvdb, error
 		if i == 0 {
 			if urlTokens[0] == "etcd" {
 				kvdbType = "etcd"
-			} else if urlTokens[0] == "consul" {
-				kvdbType = "consul"
 			} else {
 				return nil, fmt.Errorf("unknown discovery endpoint : %v in %v", urlTokens[0], endpoints)
 			}
@@ -1714,8 +1724,6 @@ func getKVDBClient(endpoints []string, opts map[string]string) (kvdb.Kvdb, error
 	}
 
 	switch kvdbVersion {
-	case kvdb.ConsulVersion1:
-		kvdbName = consul.Name
 	case kvdb.EtcdBaseVersion:
 		kvdbName = e2.Name
 	case kvdb.EtcdVersion3:
