@@ -1256,11 +1256,16 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 
 		// Get per zone cloud drive attach driveset config maps
+		configMapPrefixes := []string{
+			pxBringupQueueConfigMapPrefix,
+		}
 		cms, err := ops.coreOps.ListConfigMap(ns, metav1.ListOptions{})
 		for _, cm := range cms.Items {
-			if strings.HasPrefix(cm.Name, pxAttachDrivesetConfigMap) ||
-				strings.HasPrefix(cm.Name, pxBringupQueueConfigMapPrefix) {
-				configMaps = append(configMaps, cm.Name)
+			for _, prefixConfigMap := range configMapPrefixes {
+				if strings.HasPrefix(cm.Name, prefixConfigMap) {
+					configMaps = append(configMaps, cm.Name)
+					break
+				}
 			}
 		}
 
