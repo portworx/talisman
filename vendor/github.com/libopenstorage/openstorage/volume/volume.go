@@ -40,6 +40,11 @@ var (
 	ErrAborted = errors.New("Aborted CapacityUsage request")
 	// ErrInvalidName returned when Cloudbackup Name/request is invalid
 	ErrInvalidName = errors.New("Invalid name for cloud backup/restore request")
+	// ErrFsResizeFailed returned when Filesystem resize failed because of filesystem
+	// errors
+	ErrFsResizeFailed = errors.New("Filesystem Resize failed due to filesystem errors")
+	// ErrNoVolumeUpdate is returned when a volume update has no changes requested
+	ErrNoVolumeUpdate = errors.New("No change requested")
 )
 
 // Constants used by the VolumeDriver
@@ -112,7 +117,8 @@ type SnapshotDriver interface {
 	//	1. group ID
 	//	2. labels
 	//	3. volumeIDs
-	SnapshotGroup(groupID string, labels map[string]string, volumeIDs []string) (*api.GroupSnapCreateResponse, error)
+	//	deleteOnFailure indicates whether to delete the successful snaps if some of the snapshots failed
+	SnapshotGroup(groupID string, labels map[string]string, volumeIDs []string, deleteOnFailure bool) (*api.GroupSnapCreateResponse, error)
 }
 
 // StatsDriver interface provides stats features
@@ -130,6 +136,9 @@ type StatsDriver interface {
 	// CapacityUsage returns both exclusive and shared usage
 	// of a snap/volume
 	CapacityUsage(ID string) (*api.CapacityUsageResponse, error)
+	// VolumeUsageByNode returns capacity usage of all volumes and snaps for a
+	// given node
+	VolumeUsageByNode(nodeID string) (*api.VolumeUsageByNode, error)
 }
 
 type QuiesceDriver interface {
@@ -176,6 +185,8 @@ type CloudBackupDriver interface {
 	CloudBackupSchedDelete(input *api.CloudBackupSchedDeleteRequest) error
 	// CloudBackupSchedEnumerate enumerates the configured backup schedules in the cluster
 	CloudBackupSchedEnumerate() (*api.CloudBackupSchedEnumerateResponse, error)
+	// CloudBackupSize fetches the size of a cloud backup
+	CloudBackupSize(input *api.SdkCloudBackupSizeRequest) (*api.SdkCloudBackupSizeResponse, error)
 }
 
 // CloudMigrateDriver interface provides Cloud migration features
@@ -188,6 +199,34 @@ type CloudMigrateDriver interface {
 	CloudMigrateStatus(request *api.CloudMigrateStatusRequest) (*api.CloudMigrateStatusResponse, error)
 }
 
+// FilesystemTrimDriver interface exposes APIs to manage filesystem trim
+// operation on a volume
+type FilesystemTrimDriver interface {
+	// FilesystemTrimStart starts a filesystem trim background operation on a
+	// specified volume
+	FilesystemTrimStart(request *api.SdkFilesystemTrimStartRequest) (*api.SdkFilesystemTrimStartResponse, error)
+	// FilesystemTrimStatus returns the status of a filesystem trim
+	// background operation on a specified volume, if any
+	FilesystemTrimStatus(request *api.SdkFilesystemTrimStatusRequest) (*api.SdkFilesystemTrimStatusResponse, error)
+	// FilesystemTrimStop stops a filesystem trim background operation on
+	// a specified volume, if any
+	FilesystemTrimStop(request *api.SdkFilesystemTrimStopRequest) (*api.SdkFilesystemTrimStopResponse, error)
+}
+
+// FilesystemCheckDriver interface exposes APIs to manage filesystem check
+// operation on a volume
+type FilesystemCheckDriver interface {
+	// FilesystemCheckStart starts a filesystem check background operation
+	// on a specified volume
+	FilesystemCheckStart(request *api.SdkFilesystemCheckStartRequest) (*api.SdkFilesystemCheckStartResponse, error)
+	// FilesystemCheckStatus returns the status of a filesystem check
+	// background operation on the filesystem of a specified volume, if any.
+	FilesystemCheckStatus(request *api.SdkFilesystemCheckStatusRequest) (*api.SdkFilesystemCheckStatusResponse, error)
+	// FilesystemCheckStop stops the filesystem check background operation on
+	// the filesystem of a specified volume, if any.
+	FilesystemCheckStop(request *api.SdkFilesystemCheckStopRequest) (*api.SdkFilesystemCheckStopResponse, error)
+}
+
 // ProtoDriver must be implemented by all volume drivers.  It specifies the
 // most basic functionality, such as creating and deleting volumes.
 type ProtoDriver interface {
@@ -197,6 +236,8 @@ type ProtoDriver interface {
 	CredsDriver
 	CloudBackupDriver
 	CloudMigrateDriver
+	FilesystemTrimDriver
+	FilesystemCheckDriver
 	// Name returns the name of the driver.
 	Name() string
 	// Type of this driver
@@ -227,6 +268,8 @@ type ProtoDriver interface {
 	Shutdown()
 	// DU specified volume and potentially the subfolder if provided.
 	Catalog(volumeid, subfolder string, depth string) (api.CatalogResponse, error)
+	// Does a Filesystem Trim operation to free unused space to block device(block discard)
+	VolService(volumeID string, vsreq *api.VolumeServiceRequest) (*api.VolumeServiceResponse, error)
 }
 
 // Enumerator provides a set of interfaces to get details on a set of volumes.
@@ -269,6 +312,8 @@ type CredsDriver interface {
 	CredsDelete(credUUID string) error
 	// CredsValidate validates the credential associated credUUID
 	CredsValidate(credUUID string) error
+	// CredsDeleteReferences delets any  with the creds
+	CredsDeleteReferences(credUUID string) error
 }
 
 // VolumeDriverProvider provides VolumeDrivers.

@@ -5,12 +5,16 @@ import (
 	"errors"
 	"time"
 
+	"github.com/libopenstorage/openstorage/pkg/diags"
+
 	"github.com/libopenstorage/gossip/types"
 	"github.com/libopenstorage/openstorage/api"
 	"github.com/libopenstorage/openstorage/objectstore"
 	"github.com/libopenstorage/openstorage/osdconfig"
 	"github.com/libopenstorage/openstorage/pkg/auth"
 	"github.com/libopenstorage/openstorage/pkg/clusterdomain"
+	"github.com/libopenstorage/openstorage/pkg/job"
+	"github.com/libopenstorage/openstorage/pkg/nodedrain"
 	sched "github.com/libopenstorage/openstorage/schedpolicy"
 	"github.com/libopenstorage/openstorage/secrets"
 	"github.com/portworx/kvdb"
@@ -47,6 +51,14 @@ type ClusterServerConfiguration struct {
 	ConfigSystemTokenManager auth.TokenGenerator
 	// holds implementation to ClusterDomains interface
 	ConfigClusterDomainProvider clusterdomain.ClusterDomainProvider
+	// holds implementation to the OpenStoragePoolServer interface
+	ConfigStoragePoolProvider api.OpenStoragePoolServer
+	// holds implementation to the JobProvider interface
+	ConfigJobProvider job.Provider
+	// holds implementation to the NodeDrainProvider interface
+	ConfigNodeDrainProvider nodedrain.Provider
+	// holds the actual implementation to the SDK OpenStorageDiags interface
+	ConfigDiagsProvider diags.Provider
 }
 
 // NodeEntry is used to discover other nodes in the cluster
@@ -66,6 +78,9 @@ type NodeEntry struct {
 	GossipPort        string
 	ClusterDomain     string
 	HWType            api.HardwareType
+
+	// Determine if the node is secure with authentication and authorization
+	SecurityStatus api.StorageNode_SecurityStatus
 }
 
 // ClusterInfo is the basic info about the cluster and its nodes
@@ -108,6 +123,9 @@ type ClusterListener interface {
 
 	// Init is called when this node is joining an existing cluster for the first time.
 	Init(self *api.Node, state *ClusterInfo) (FinalizeInitCb, error)
+
+	// PreJoin is called before the node joins an existing cluster
+	PreJoin(self *api.Node) error
 
 	// Join is called when this node is joining an existing cluster.
 	Join(self *api.Node, state *ClusterInitState) error
@@ -164,7 +182,7 @@ type ClusterListenerGenericOps interface {
 	UpdateCluster(self *api.Node, clusterInfo *ClusterInfo) error
 
 	// Enumerate updates listener specific data in Enumerate.
-	Enumerate(cluster api.Cluster) error
+	Enumerate(cluster *api.Cluster) error
 }
 
 // ClusterListenerStatusOps defines APIs that a listener needs to implement
@@ -375,6 +393,10 @@ type Cluster interface {
 	secrets.Secrets
 	sched.SchedulePolicyProvider
 	objectstore.ObjectStore
+	api.OpenStoragePoolServer
+	job.Provider
+	nodedrain.Provider
+	diags.Provider
 }
 
 // NullClusterListener is a NULL implementation of ClusterListener functions
@@ -401,7 +423,7 @@ func (nc *NullClusterListener) CleanupInit(
 	return nil
 }
 
-func (nc *NullClusterListener) Enumerate(cluster api.Cluster) error {
+func (nc *NullClusterListener) Enumerate(_ *api.Cluster) error {
 	return nil
 }
 
@@ -411,7 +433,14 @@ func (nc *NullClusterListener) NodeInspect(node *api.Node) error {
 
 func (nc *NullClusterListener) Halt(
 	self *api.Node,
-	clusterInfo *ClusterInfo) error {
+	clusterInfo *ClusterInfo,
+) error {
+	return nil
+}
+
+func (nc *NullClusterListener) PreJoin(
+	self *api.Node,
+) error {
 	return nil
 }
 
@@ -514,4 +543,8 @@ func (nc *NullClusterListener) ValidatePair(
 	pair *api.ClusterPairInfo,
 ) error {
 	return nil
+}
+
+// StoragePoolProvider is the backing provider for openstorage SDK operations on storage pools
+type StoragePoolProvider interface {
 }

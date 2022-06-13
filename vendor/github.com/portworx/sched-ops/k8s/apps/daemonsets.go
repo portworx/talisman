@@ -10,13 +10,14 @@ import (
 	"github.com/portworx/sched-ops/task"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // DaemonSetOps is an interface to perform k8s daemon set operations
 type DaemonSetOps interface {
 	// CreateDaemonSet creates the given daemonset
-	CreateDaemonSet(ds *appsv1.DaemonSet) (*appsv1.DaemonSet, error)
+	CreateDaemonSet(ds *appsv1.DaemonSet, opts metav1.CreateOptions) (*appsv1.DaemonSet, error)
 	// ListDaemonSets lists all daemonsets in given namespace
 	ListDaemonSets(namespace string, listOpts metav1.ListOptions) ([]appsv1.DaemonSet, error)
 	// GetDaemonSet gets the the daemon set with given name
@@ -29,15 +30,17 @@ type DaemonSetOps interface {
 	UpdateDaemonSet(*appsv1.DaemonSet) (*appsv1.DaemonSet, error)
 	// DeleteDaemonSet deletes the given daemonset
 	DeleteDaemonSet(name, namespace string) error
+	// ValidateDaemonSetIsTerminated validates if given daemonset is terminated
+	ValidateDaemonSetIsTerminated(name, namespace string, timeout time.Duration) error
 }
 
 // CreateDaemonSet creates the given daemonset
-func (c *Client) CreateDaemonSet(ds *appsv1.DaemonSet) (*appsv1.DaemonSet, error) {
+func (c *Client) CreateDaemonSet(ds *appsv1.DaemonSet, opts metav1.CreateOptions) (*appsv1.DaemonSet, error) {
 	if err := c.initClient(); err != nil {
 		return nil, err
 	}
 
-	return c.apps.DaemonSets(ds.Namespace).Create(context.TODO(), ds, metav1.CreateOptions{})
+	return c.apps.DaemonSets(ds.Namespace).Create(context.TODO(), ds, opts)
 }
 
 // ListDaemonSets lists all daemonsets in given namespace
@@ -177,4 +180,34 @@ func (c *Client) DeleteDaemonSet(name, namespace string) error {
 	return c.apps.DaemonSets(namespace).Delete(context.TODO(),
 		name,
 		metav1.DeleteOptions{PropagationPolicy: &deleteForegroundPolicy})
+}
+
+// ValidateDaemonSetIsTerminated validates if given daemonset is terminated
+func (c *Client) ValidateDaemonSetIsTerminated(name, namespace string, timeout time.Duration) error {
+	t := func() (interface{}, bool, error) {
+		ds, err := c.GetDaemonSet(name, namespace)
+		if errors.IsNotFound(err) {
+			return nil, false, nil
+		} else if err != nil {
+			return nil, true, err
+		}
+
+		currPods := ds.Status.CurrentNumberScheduled
+		if currPods > 0 {
+			return nil, true, &schederrors.ErrAppNotTerminated{
+				ID:    ds.Name,
+				Cause: fmt.Sprintf("%d pods are still present", currPods),
+			}
+		}
+
+		return nil, true, &schederrors.ErrAppNotTerminated{
+			ID:    ds.Name,
+			Cause: fmt.Sprintf("daemon is still present"),
+		}
+	}
+
+	if _, err := task.DoRetryWithTimeout(t, timeout, 15*time.Second); err != nil {
+		return err
+	}
+	return nil
 }
