@@ -1139,9 +1139,25 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	}
 
 	configMaps := []string{
+		pxAttachDrivesetConfigMap,
 		fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
 		fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
 	}
+
+	// Get per zone cloud drive attach driveset config maps
+	configMapPrefixes := []string{
+		pxBringupQueueConfigMapPrefix,
+	}
+	cms, err := ops.coreOps.ListConfigMap(bootstrapCloudDriveNamespace, metav1.ListOptions{})
+	for _, cm := range cms.Items {
+		for _, prefixConfigMap := range configMapPrefixes {
+			if strings.HasPrefix(cm.Name, prefixConfigMap) {
+				configMaps = append(configMaps, cm.Name)
+				break
+			}
+		}
+	}
+
 	for _, cm := range configMaps {
 		err = ops.coreOps.DeleteConfigMap(cm, bootstrapCloudDriveNamespace)
 		if err != nil && !errors.IsNotFound(err) {
@@ -1253,20 +1269,6 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 			// in case the behavior changes
 			fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, strippedClusterName),
 			fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, strippedClusterName),
-		}
-
-		// Get per zone cloud drive attach driveset config maps
-		configMapPrefixes := []string{
-			pxBringupQueueConfigMapPrefix,
-		}
-		cms, err := ops.coreOps.ListConfigMap(ns, metav1.ListOptions{})
-		for _, cm := range cms.Items {
-			for _, prefixConfigMap := range configMapPrefixes {
-				if strings.HasPrefix(cm.Name, prefixConfigMap) {
-					configMaps = append(configMaps, cm.Name)
-					break
-				}
-			}
 		}
 
 		for _, cm := range configMaps {

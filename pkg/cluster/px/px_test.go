@@ -19,7 +19,7 @@ import (
 
 var (
 	testsOps        *pxClusterOps
-	testNamespace   = "kube-system"
+	testNamespace   = "portworx"
 	testClusterName = "pxut"
 )
 
@@ -49,37 +49,37 @@ func TestDeleteAllPXComponents(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("%s%s", internalEtcdConfigMapPrefix, testClusterName),
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("%s%s", cloudDriveConfigMapPrefix, testClusterName),
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      pxAttachDrivesetConfigMap,
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("%sus-west-2a", pxBringupQueueConfigMapPrefix),
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("%sus-west-2b", pxBringupQueueConfigMapPrefix),
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("%sus-west-2c", pxBringupQueueConfigMapPrefix),
-				Namespace: testNamespace,
+				Namespace: bootstrapCloudDriveNamespace,
 			},
 		},
 	}
