@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/portworx/sched-ops/k8s/admissionregistration"
 	"github.com/portworx/sched-ops/k8s/apps"
 	"github.com/portworx/sched-ops/k8s/core"
 	"github.com/portworx/sched-ops/k8s/rbac"
 	"github.com/portworx/sched-ops/k8s/storage"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -89,6 +91,17 @@ func TestDeleteAllPXComponents(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Create stork webhook
+	webhookConfig := admissionv1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("stork-webhooks-cfg"),
+		},
+	}
+	_, err = admissionregistration.Instance().CreateMutatingWebhookConfiguration(&webhookConfig)
+	require.NoError(t, err)
+	wh, err := admissionregistration.Instance().GetMutatingWebhookConfiguration("stork-webhooks-cfg")
+	require.NotNil(t, wh)
+
 	// Test delete
 	err = testsOps.deleteAllPXComponents(testClusterName)
 	require.NoError(t, err)
@@ -99,6 +112,10 @@ func TestDeleteAllPXComponents(t *testing.T) {
 		// should not be found
 		require.Truef(t, errors.IsNotFound(err), "config map: [%s] %s wasn't deleted", cm.Namespace, cm.Name)
 	}
+
+	// Webhook should be deleted
+	wh, err = admissionregistration.Instance().GetMutatingWebhookConfiguration("stork-webhooks-cfg")
+	require.Nil(t, wh)
 
 	// TEST2 Test delete when config maps don't exist
 	_, err = apps.Instance().CreateDaemonSet(pxDS, metav1.CreateOptions{})
@@ -116,12 +133,14 @@ func setup() {
 	apps.SetInstance(apps.New(fakeKubeClient.AppsV1(), fakeKubeClient.CoreV1()))
 	rbac.SetInstance(rbac.New(fakeKubeClient.RbacV1()))
 	storage.SetInstance(storage.New(fakeKubeClient.StorageV1()))
+	admissionregistration.SetInstance(admissionregistration.New(fakeKubeClient.AdmissionregistrationV1beta1(), fakeKubeClient.AdmissionregistrationV1()))
 
 	testsOps = &pxClusterOps{
 		coreOps:             core.Instance(),
 		k8sApps:             apps.Instance(),
 		k8sRBAC:             rbac.Instance(),
 		k8sStorage:          storage.Instance(),
+		k8sAdmissions:       admissionregistration.Instance(),
 		installedNamespaces: []string{testNamespace},
 	}
 }

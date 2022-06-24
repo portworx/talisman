@@ -125,6 +125,7 @@ github.com/portworx/kvdb/etcd/v3
 github.com/portworx/kvdb/mem
 # github.com/portworx/sched-ops v1.20.4-rc1.0.20220525162714-62ad1f4ebae1
 ## explicit
+github.com/portworx/sched-ops/k8s/admissionregistration
 github.com/portworx/sched-ops/k8s/apps
 github.com/portworx/sched-ops/k8s/common
 github.com/portworx/sched-ops/k8s/core

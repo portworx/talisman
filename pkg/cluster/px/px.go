@@ -15,6 +15,7 @@ import (
 	"github.com/portworx/kvdb"
 	e2 "github.com/portworx/kvdb/etcd/v2"
 	e3 "github.com/portworx/kvdb/etcd/v3"
+	"github.com/portworx/sched-ops/k8s/admissionregistration"
 	"github.com/portworx/sched-ops/k8s/apps"
 	"github.com/portworx/sched-ops/k8s/core"
 	"github.com/portworx/sched-ops/k8s/rbac"
@@ -144,6 +145,7 @@ const (
 	storkSchedulerServiceAccount    = "stork-scheduler-account"
 	storkSchedulerName              = "stork-scheduler"
 	storkSnapshotStorageClass       = "stork-snapshot-sc"
+	storkWebhookCfg                 = "stork-webhooks-cfg"
 	csiClusterRoleBinding           = "px-csi-role-binding"
 	csiService                      = "px-csi-service"
 	csiAccount                      = "px-csi-account"
@@ -161,6 +163,7 @@ type pxClusterOps struct {
 	k8sApps              apps.Ops
 	k8sRBAC              rbac.Ops
 	k8sStorage           storage.Ops
+	k8sAdmissions        admissionregistration.Ops
 	utils                *k8sutils.Instance
 	dockerRegistrySecret string
 	platform             platformType
@@ -214,6 +217,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	k8sApps := apps.Instance()
 	k8sRBAC := rbac.Instance()
 	k8sStorage := storage.Instance()
+	k8sAdmissions := admissionregistration.Instance()
 
 	// Detect the installedNamespace
 	namespaces, err := coreOps.ListNamespaces(map[string]string{})
@@ -242,6 +246,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 		k8sApps:              k8sApps,
 		k8sRBAC:              k8sRBAC,
 		k8sStorage:           k8sStorage,
+		k8sAdmissions:        k8sAdmissions,
 		dockerRegistrySecret: dockerRegistrySecret,
 		utils:                utils,
 		installedNamespaces:  installedNamespaces,
@@ -1129,6 +1134,11 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	}
 
 	err = ops.k8sStorage.DeleteStorageClass(storkSnapshotStorageClass)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	err = ops.k8sAdmissions.DeleteMutatingWebhookConfiguration(storkWebhookCfg)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
