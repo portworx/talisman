@@ -1,5 +1,6 @@
 #!/bin/bash
 
+(
 set -x
 
 WAIT=0 # 0 means don't wait. Run to completion.
@@ -114,6 +115,14 @@ run_with_nsenter "umount $OPTPWX/oci" true
 if [ ! -f "$PXCTL" ]; then
   echo "warning: path $PXCTL doesn't exist. Skipping $PXCTL sv node-wipe --all"
 elif [ "$REMOVE_DATA" = "1" ]; then
+  if [ ! -x "$PXCTL" ]; then
+      # '/opt/pwx/bin/pxctl' exist however its not executable. Something is wrong so Check for container 'pxctl'
+      nsenter --mount=/host_proc/1/ns/mnt -- sh -c '[ -x /opt/pwx/oci/rootfs/pwx_root/opt/pwx/bin/pxctl ]'
+      if [ $? -eq 0 ]; then
+	  # Container 'pxctl' exists, copy that to host to use for 'wipe'
+	  nsenter --mount=/host_proc/1/ns/mnt -- cp /opt/pwx/oci/rootfs/pwx_root/opt/pwx/bin/pxctl $PXCTL
+      fi
+  fi
   # Nodewipe needs to be run on the host if poxxible cause multipath check issues.
   echo "Running pxctl nodewipe on the host's proc/1 namespace"
   nsenter --mount=$HOSTPROC1_NS/mnt -- "$PXCTLNM" sv node-wipe --all
@@ -159,3 +168,4 @@ else
   echo "Successfully wiped px. Sleeping..."
   sleep_forever
 fi
+) |& tee /var/cores/px-node-wipe-$(date +%s).log   # Save wipe output.
