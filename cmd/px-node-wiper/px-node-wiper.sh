@@ -1,5 +1,7 @@
 #!/bin/bash
 
+LFILE_PREFIX=/var/cores/px-node-wipe
+
 (
 set -x
 
@@ -13,6 +15,17 @@ PXCTLNM=pxctl
 PXCTL=/opt/pwx/bin/${PXCTLNM}
 
 rm -rf $STATUS_FILE
+
+WFILES=$(ls -t ${LFILE_PREFIX}-*.log  2>/dev/null)
+KEEP_NUM=3  # Keep latest <#> log files
+CNT=0
+for wfile in ${WFILES}; do  # clean up old logs
+    [ -z "${wfile}" ] && continue
+    ((CNT++))
+    [ ${CNT} -lt ${KEEP_NUM} ] && continue
+    echo "Removing old px-wipe log: ${wfile}"
+    rm -f ${wfile}
+done
 
 DBUS_ADDR=/var/run/dbus/system_bus_socket
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}"
@@ -168,4 +181,4 @@ else
   echo "Successfully wiped px. Sleeping..."
   sleep_forever
 fi
-) |& tee /var/cores/px-node-wipe-$(date +%s).log   # Save wipe output.
+) |& tee ${LFILE_PREFIX}-$(date +%s).log   # Save wipe output.
