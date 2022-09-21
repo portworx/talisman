@@ -221,6 +221,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 
 	// Detect the installedNamespace
 	namespaces, err := coreOps.ListNamespaces(map[string]string{})
+	k8sutils.TraceDumpObjectJS(namespaces, "ListNamespaces() -- err=%v", err)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +229,7 @@ func NewPXClusterProvider(dockerRegistrySecret, kubeconfig string) (Cluster, err
 	installedNamespaces := make([]string, 0)
 	for _, ns := range namespaces.Items {
 		dss, err := k8sApps.ListDaemonSets(ns.ObjectMeta.Name, pxListOpts)
+		k8sutils.TraceDumpObjectJS(dss, "ListDaemonSets(%s, %#v) -- err=%#v", ns.ObjectMeta.Name, pxListOpts, err)
 		if err != nil {
 			return nil, err
 		}
@@ -381,6 +383,14 @@ func (ops *pxClusterOps) Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) erro
 	// parse kvdb from daemonset before we delete it
 	logrus.Info("Attempting to parse kvdb info from Portworx daemonset")
 	endpoints, kvdbOpts, clusterName, ops.platform, affinity, configParseErr = ops.parseConfigFromDaemonset()
+
+	logrus.WithError(configParseErr).
+		WithField("endpoints", endpoints).
+		WithField("kvdb-opts", kvdbOpts).
+		WithField("cluster-id", clusterName).
+		WithField("platform", ops.platform).
+		WithField("affinity", affinity).Debugf("> parsed config from DS")
+
 	if configParseErr != nil && configParseErr != errUsingInternalEtcd {
 		err := fmt.Errorf("Failed to parse PX config from Daemonset for deleting PX due to err: %v", configParseErr)
 		return err
@@ -416,6 +426,7 @@ func (ops *pxClusterOps) Delete(c *apiv1beta1.Cluster, opts *DeleteOptions) erro
 		}
 	}
 
+	logrus.Infof("Delete done.")
 	return nil
 }
 
@@ -493,6 +504,7 @@ func (ops *pxClusterOps) getPXDaemonsets() ([]apps_api.DaemonSet, error) {
 	pxDaemonsets := make([]apps_api.DaemonSet, 0)
 	for _, ns := range ops.installedNamespaces {
 		dss, err := ops.k8sApps.ListDaemonSets(ns, pxListOpts)
+		k8sutils.TraceDumpObjectJS(dss, "ListDaemonSets(%s, %#v) -- err=%#v", ns, pxListOpts, err)
 		if err != nil {
 			return nil, err
 		}
@@ -1085,6 +1097,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	strippedClusterName := strings.ToLower(configMapNameRegex.ReplaceAllString(clusterName, ""))
 
 	dss, err := ops.getPXDaemonsets()
+	k8sutils.TraceDumpObjectJS(dss, "Got DaemonSets -- err=%v", err)
 	if err != nil {
 		return err
 	}
@@ -1094,6 +1107,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 	for _, ds := range dss {
 		err = ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		logrus.WithError(err).Debugf("ran DeleteDaemonSet(%s,%s)", ds.Name, ds.Namespace)
 		if err != nil {
 			return err
 		}
@@ -1108,6 +1122,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	}
 	for _, role := range clusterRoles {
 		err = ops.k8sRBAC.DeleteClusterRole(role)
+		logrus.WithError(err).Debugf("ran DeleteClusterRole(%s)", role)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1122,6 +1137,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 	}
 	for _, binding := range clusterRoleBindings {
 		err = ops.k8sRBAC.DeleteClusterRoleBinding(binding)
+		logrus.WithError(err).Debugf("ran DeleteClusterRoleBinding(%s)", binding)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1129,21 +1145,25 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 	clusterWideSecret := strings.Replace(clusterName+"_px_secret", "_", "-", -1)
 	err = ops.coreOps.DeleteSecret(clusterWideSecret, pxSecretsNamespace)
+	logrus.WithError(err).Debugf("ran DeleteSecret(%s,%s)", clusterWideSecret, pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
 	err = ops.k8sStorage.DeleteStorageClass(storkSnapshotStorageClass)
+	logrus.WithError(err).Debugf("ran DeleteStorageClass(%s)", storkSnapshotStorageClass)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
 	err = ops.k8sAdmissions.DeleteMutatingWebhookConfiguration(storkWebhookCfg)
+	logrus.WithError(err).Debugf("ran DeleteMutatingWebhookConfiguration(%s)", storkWebhookCfg)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
 	err = ops.coreOps.DeleteNamespace(pxSecretsNamespace)
+	logrus.WithError(err).Debugf("ran DeleteNamespace(%s)", pxSecretsNamespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -1159,6 +1179,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		pxBringupQueueConfigMapPrefix,
 	}
 	cms, err := ops.coreOps.ListConfigMap(bootstrapCloudDriveNamespace, metav1.ListOptions{})
+	k8sutils.TraceDumpObjectJS(cms, "ListConfigMap(%s) -- err:%v", bootstrapCloudDriveNamespace, err)
 	for _, cm := range cms.Items {
 		for _, prefixConfigMap := range configMapPrefixes {
 			if strings.HasPrefix(cm.Name, prefixConfigMap) {
@@ -1170,6 +1191,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 	for _, cm := range configMaps {
 		err = ops.coreOps.DeleteConfigMap(cm, bootstrapCloudDriveNamespace)
+		logrus.WithError(err).Debugf("ran DeleteConfigMap(%s,%s)", cm, bootstrapCloudDriveNamespace)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1180,6 +1202,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		// Delete portworx-api daemonset
 		err = ops.k8sApps.DeleteDaemonSet(pxAPIDaemonset, ns)
+		logrus.WithError(err).Debugf("ran DeleteDaemonSet(%s,%s)", pxAPIDaemonset, ns)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -1192,6 +1215,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 		for _, depName := range depNames {
 			err = ops.k8sApps.DeleteDeployment(depName, ns)
+			logrus.WithError(err).Debugf("ran DeleteDeployment(%s,%s)", depName, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1203,6 +1227,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 		for _, role := range roles {
 			err = ops.k8sRBAC.DeleteRole(role[0], role[1])
+			logrus.WithError(err).Debugf("ran DeleteRole(%s,%s)", role[0], role[1])
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1213,6 +1238,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 		for _, binding := range roleBindings {
 			err = ops.k8sRBAC.DeleteRoleBinding(binding[0], binding[1])
+			logrus.WithError(err).Debugf("ran DeleteRoleBinding(%s,%s)", binding[0], binding[1])
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1228,6 +1254,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 		for _, acc := range accounts {
 			err = ops.coreOps.DeleteServiceAccount(acc, ns)
+			logrus.WithError(err).Debugf("ran DeleteServiceAccount(%s,%s)", acc, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1242,6 +1269,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 		}
 		for _, svc := range services {
 			err = ops.coreOps.DeleteService(svc, ns)
+			logrus.WithError(err).Debugf("ran DeleteService(%s,%s)", svc, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1253,6 +1281,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		for _, ss := range statefulSets {
 			err = ops.k8sApps.DeleteStatefulSet(ss, ns)
+			logrus.WithError(err).Debugf("ran DeleteStatefulSet(%s,%s)", ss, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1265,6 +1294,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		for _, sec := range secrets {
 			err = ops.coreOps.DeleteSecret(sec, ns)
+			logrus.WithError(err).Debugf("ran DeleteSecret(%s,%s)", sec, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1283,6 +1313,7 @@ func (ops *pxClusterOps) deleteAllPXComponents(clusterName string) error {
 
 		for _, cm := range configMaps {
 			err = ops.coreOps.DeleteConfigMap(cm, ns)
+			logrus.WithError(err).Debugf("ran DeleteConfigMap(%s,%s)", cm, ns)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -1339,7 +1370,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 								Privileged: &trueVar,
 							},
 							ReadinessProbe: &corev1.Probe{
-								InitialDelaySeconds: 30,
+								InitialDelaySeconds: 120,
 								Handler: corev1.Handler{
 									Exec: &corev1.ExecAction{
 										Command: []string{"cat", "/tmp/px-node-wipe-done"},
@@ -1506,6 +1537,15 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 		},
 	}
 
+	// add '--debug' on TRACE debug-level
+	if logrus.IsLevelEnabled(logrus.DebugLevel) {
+		newArgs := make([]string, 0, len(ds.Spec.Template.Spec.Containers[0].Args))
+		newArgs = append(newArgs, "--debug")
+		newArgs = append(newArgs, ds.Spec.Template.Spec.Containers[0].Args...)
+		ds.Spec.Template.Spec.Containers[0].Args = newArgs
+	}
+
+	k8sutils.TraceDumpObjectJS(ds, "node-wiper DS:")
 	return ops.runDaemonSet(ds, pxNodeWiperTimeout)
 }
 
@@ -1514,6 +1554,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Duration) error {
 
 	err := ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
+	logrus.WithError(err).Debugf("ran DeleteDaemonSet(%s,%s) -- PRE", ds.Name, ds.Namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -1532,6 +1573,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 	}
 
 	ds, err = ops.k8sApps.CreateDaemonSet(ds, metav1.CreateOptions{})
+	logrus.WithError(err).Debugf("ran CreateDaemonSet(%s/%s)", ds.ObjectMeta.Namespace, ds.ObjectMeta.Name)
 	if err != nil {
 		return err
 	}
@@ -1541,12 +1583,14 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 	// Delete the daemonset regardless of status
 	defer func(ds *apps_api.DaemonSet) {
 		err := ops.k8sApps.DeleteDaemonSet(ds.Name, ds.Namespace)
+		logrus.WithError(err).Debugf("ran DeleteDaemonSet(%s,%s)", ds.Name, ds.Namespace)
 		if err != nil && !errors.IsNotFound(err) {
 			logrus.Warnf("error while deleting daemonset: %v", err)
 		}
 	}(ds)
 
 	err = ops.k8sApps.ValidateDaemonSet(ds.Name, ds.Namespace, timeout)
+	logrus.WithError(err).Debugf("ran ValidateDaemonSet(%s,%s,%s)", ds.Name, ds.Namespace, timeout)
 	if err != nil {
 		return err
 	}
@@ -1559,6 +1603,7 @@ func (ops *pxClusterOps) runDaemonSet(ds *apps_api.DaemonSet, timeout time.Durat
 func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affinity) error {
 
 	_, err := ops.k8sApps.GetDaemonSet(pxAPIDaemonset, namespace)
+	logrus.WithError(err).Debugf("ran GetDaemonSet(%s,%s)", pxAPIDaemonset, namespace)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -1606,7 +1651,9 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 			},
 		}
 
+		k8sutils.TraceDumpObjectJS(apiDS, "api DS:")
 		_, err = ops.k8sApps.CreateDaemonSet(apiDS, metav1.CreateOptions{})
+		logrus.WithError(err).Debugf("ran CreateDaemonSet(%s/%s)", apiDS.ObjectMeta.Namespace, apiDS.ObjectMeta.Name)
 		if err != nil {
 			return err
 		}
@@ -1619,6 +1666,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 
 func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32]int32) error {
 	_, err := ops.coreOps.GetService(pxAPIServiceName, namespace)
+	logrus.WithError(err).Debugf("ran GetService(%s,%s)", pxAPIServiceName, namespace)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -1657,7 +1705,9 @@ func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32
 			},
 		}
 
+		k8sutils.TraceDumpObjectJS(apiService, "api Service:")
 		_, err = ops.coreOps.CreateService(apiService)
+		logrus.WithError(err).Debugf("ran CreateService()")
 		if err != nil {
 			return err
 		}
@@ -1672,6 +1722,7 @@ func (ops *pxClusterOps) checkAPIService(namespace string, targetPorts map[int32
 							]
 						}}`, targetPorts[9001], targetPorts[9020], targetPorts[9021]))
 		_, err = ops.coreOps.PatchService(pxAPIServiceName, namespace, patch)
+		logrus.WithError(err).Debugf("ran PatchService()")
 		if err != nil {
 			return err
 		}
@@ -1748,6 +1799,11 @@ func getKVDBClient(endpoints []string, opts map[string]string) (kvdb.Kvdb, error
 	default:
 		return nil, fmt.Errorf("Unknown kvdb endpoint (%v) and version (%v) ", endpoints, kvdbVersion)
 	}
+
+	logrus.WithField("name", kvdbName).
+		WithField("prefix", pxKvdbPrefix).
+		WithField("endpoints", endpoints).
+		WithField("opts", opts).Debugf("kvdb client created")
 
 	return kvdb.New(kvdbName, pxKvdbPrefix, endpoints, opts, nil)
 }

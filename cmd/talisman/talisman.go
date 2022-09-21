@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/cluster/px"
@@ -33,6 +34,9 @@ var (
 	sharedAppsScaleDown   string
 	wipeCluster           bool
 	upgradeTimeoutPerNode int
+	logFile               string
+	logLevelDebug         bool
+	logLevelTrace         bool
 )
 
 func main() {
@@ -41,6 +45,19 @@ func main() {
 
 	if len(op) == 0 {
 		logrus.Fatalf("error: no operation given for the PX cluster")
+	}
+
+	// fix logging
+	if logFile != "" {
+		err := setLogfile(logFile)
+		if err != nil {
+			logrus.WithError(err).Warnf("Error setting logging to %s file", logFile)
+		}
+	}
+	if logLevelTrace {
+		logrus.SetLevel(logrus.TraceLevel)
+	} else if logLevelDebug {
+		logrus.SetLevel(logrus.DebugLevel)
 	}
 
 	switch pxOperation(op) {
@@ -55,7 +72,21 @@ func main() {
 	}
 }
 
+func setLogfile(fname string) error {
+	f, err := os.OpenFile(fname, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("Redirecting all output to %s", fname)
+	_, _ = fmt.Fprintln(f, "------------------------------------------------------------------------------")
+	os.Stdout, os.Stderr = f, f
+	logrus.SetOutput(f)
+	logrus.Info("Started logging into ", fname)
+	return nil
+}
+
 func doUpgrade() {
+	logrus.Info("Performing UPGRADE operation")
 	if len(newOCIMonTag) == 0 {
 		logrus.Fatalf("error: new OCI monitor tag not specified for %s operation", op)
 	}
@@ -87,6 +118,7 @@ func doUpgrade() {
 }
 
 func doRestoreSharedApps() {
+	logrus.Info("Performing RESTORE operation")
 	inst, err := k8sutils.New(kubeconfig)
 	if err != nil {
 		logrus.Fatalf("failed to restore shared apps. err: %v", err)
@@ -99,6 +131,7 @@ func doRestoreSharedApps() {
 }
 
 func doDelete() {
+	logrus.Info("Performing DELETE operation")
 	inst, err := px.NewPXClusterProvider(dockerRegistrySecret, kubeconfig)
 	if err != nil {
 		logrus.Fatalf("failed to instantiate PX cluster provider. err: %v", err)
@@ -109,6 +142,7 @@ func doDelete() {
 		WiperImage:  wiperImage,
 		WiperTag:    wiperTag,
 	}
+	k8sutils.DebugDumpObjectJS(opts, "DELETE options:")
 
 	err = inst.Delete(nil, opts)
 	if err != nil {
@@ -136,4 +170,7 @@ func init() {
 	flag.StringVar(&wiperImage, "wiperimage", "", "Node wiper image to use for the upgrade")
 	flag.StringVar(&wiperTag, "wipertag", "", "Node wiper tag to use for the upgrade")
 	flag.IntVar(&upgradeTimeoutPerNode, "upgradetimeoutpernode", 600, "Timeout per node in seconds for performing upgrade")
+	flag.StringVar(&logFile, "log", "", "Specify log file")
+	flag.BoolVar(&logLevelDebug, "debug", false, "(optional) Increase logging verbosity (DEBUG level)")
+	flag.BoolVar(&logLevelTrace, "trace", false, "(optional) Increase logging verbosity (TRACE level)")
 }
