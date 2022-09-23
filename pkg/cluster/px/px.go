@@ -1537,7 +1537,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 		},
 	}
 
-	// add '--debug' on TRACE debug-level
+	// pass on '--debug' flag ?
 	if logrus.IsLevelEnabled(logrus.DebugLevel) {
 		newArgs := make([]string, 0, len(ds.Spec.Template.Spec.Containers[0].Args))
 		newArgs = append(newArgs, "--debug")
