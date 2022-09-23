@@ -1,9 +1,13 @@
 #!/bin/bash
 
-LFILE_PREFIX=/var/cores/px-node-wipe
-
-(
-set -x
+# Debug on?
+if [ "x$1" = "x--debug" ]; then
+    shift
+    export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
+    exec 1>> /var/cores/px-node-wipe.log 2>&1
+    echo -e ".____________/ DEBUG-START by $(id) as '$0 $@' on $(date)" 2>&1
+    set -x
+fi
 
 WAIT=0 # 0 means don't wait. Run to completion.
 REMOVE_DATA=0 #0 means do not delete data
@@ -15,17 +19,6 @@ PXCTLNM=pxctl
 PXCTL=/opt/pwx/bin/${PXCTLNM}
 
 rm -rf $STATUS_FILE
-
-WFILES=$(ls -t ${LFILE_PREFIX}-*.log  2>/dev/null)
-KEEP_NUM=3  # Keep latest <#> log files
-CNT=0
-for wfile in ${WFILES}; do  # clean up old logs
-    [ -z "${wfile}" ] && continue
-    ((CNT++))
-    [ ${CNT} -lt ${KEEP_NUM} ] && continue
-    echo "Removing old px-wipe log: ${wfile}"
-    rm -f ${wfile}
-done
 
 DBUS_ADDR=/var/run/dbus/system_bus_socket
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_ADDR}"
@@ -43,13 +36,6 @@ usage() {
 cleanup () {
   kill -s SIGTERM $!
   exit 0
-}
-
-sleep_forever() {
-  while : ; do
-    sleep 60 &
-    wait $!
-  done
 }
 
 # run_with_nsenter runs the given command in the host's proc/1 namespace using nsenter
@@ -171,7 +157,7 @@ if [ "$REMOVE_DATA" = "1" ]; then
     touch "$STATUS_FILE"
     if [ "$WAIT" = "1" ]; then
       echo "Successfully wiped px. Sleeping..."
-      sleep_forever
+      sleep 1800
     fi
   else
       fatal "error: remove pwx configuration failed with code: $?"
@@ -179,6 +165,5 @@ if [ "$REMOVE_DATA" = "1" ]; then
 else
   touch "$STATUS_FILE"
   echo "Successfully wiped px. Sleeping..."
-  sleep_forever
+  sleep 1800
 fi
-) |& tee ${LFILE_PREFIX}-$(date +%s).log   # Save wipe output.
