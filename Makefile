@@ -126,8 +126,8 @@ verifycodegen:
 pretest: checkfmt vet lint errcheck
 
 container:
-	sudo docker --pull build --tag $(TALISMAN_IMG) -f Dockerfile.talisman .
-	sudo docker --pull build -t $(PX_NODE_WIPER_IMG) cmd/px-node-wiper/
+	sudo docker  build --pull --tag $(TALISMAN_IMG) -f Dockerfile.talisman .
+	sudo docker  build --pull --tag $(PX_NODE_WIPER_IMG) cmd/px-node-wiper/
 
 deploy: container
 	sudo docker push $(TALISMAN_IMG)
