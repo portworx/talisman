@@ -136,7 +136,7 @@ deploy: container
 docker-build:
 	@echo "Building using docker"
 	docker run --rm -v $(shell pwd):/go/src/github.com/portworx/talisman $(DOCK_BUILD_CNT) \
-		/bin/bash -c "cd /go/src/github.com/portworx/talisman; make all" 
+		/bin/bash -c "cd /go/src/github.com/portworx/talisman; make all"
 
 
 .PHONY: test clean name run version
