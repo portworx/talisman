@@ -18,7 +18,7 @@ GO     := go
 GOENV  := GOOS=linux GOARCH=amd64
 DIR=.
 
-DOCK_BUILD_CNT	:= golang:1.13
+DOCK_BUILD_CNT	:= golang:1.17.13
 
 ifndef TAGS
 TAGS := daemon
@@ -141,10 +141,11 @@ docker-build:
 
 .PHONY: test clean name run version
 
-clean:
-	@echo Cleaning Workspace...
-	-sudo rm -rf $(BIN)
-	-docker rmi -f $(OPERATOR_IMG)
+container-clean:
 	-docker rmi -f $(PX_NODE_WIPER_IMG)
 	-docker rmi -f $(TALISMAN_IMG)
+
+clean:
+	@echo Cleaning Workspace...
+	-[ $(shell id -u) -ne 0 ] && sudo rm -rf $(BIN) || rm -rf $(BIN)
 	go clean -i $(PKGS)

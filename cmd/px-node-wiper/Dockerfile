@@ -1,4 +1,4 @@
-FROM portworx/px-lib:bionic-gs-rel-2.10.0-ea-base-gs-grpc-1.8.0
+FROM portworx/px-lib:bionic-gs-rel-2.13.0-base-gs-grpc-1.8.0
 
 WORKDIR /
 

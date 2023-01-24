@@ -19,6 +19,7 @@ require (
 replace (
 	github.com/go-logr/logr => github.com/go-logr/logr v0.3.0
 	github.com/kubernetes-incubator/external-storage => github.com/libopenstorage/external-storage v5.1.1-0.20211117214128-ec0a73271457+incompatible
+	golang.org/x/text => golang.org/x/text v0.3.8
 	google.golang.org/grpc => google.golang.org/grpc v1.29.1
 
 	// Replacing k8s.io dependencies is required if a dependency or any dependency of a dependency
