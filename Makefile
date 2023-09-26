@@ -135,7 +135,7 @@ deploy: container
 
 docker-build:
 	@echo "Building using docker"
-	docker run --rm -v $(shell pwd):/go/src/github.com/portworx/talisman $(DOCK_BUILD_CNT) \
+	docker run --rm -v $(shell pwd):/go/src/github.com/portworx/talisman -v $(HOME)/.gitconfig:/root/.gitconfig $(DOCK_BUILD_CNT) \
 		/bin/bash -c "cd /go/src/github.com/portworx/talisman; make all"
 
 
