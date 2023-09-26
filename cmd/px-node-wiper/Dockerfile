@@ -1,4 +1,4 @@
-FROM portworx/px-lib:bionic-gs-rel-2.13.0-base-gs-grpc-1.8.0
+FROM portworx/px-lib:bionic-hk-rel-3.0.1-base-grpc-1.8.0-lttng-2.12-go-1.20.7
 
 WORKDIR /
 
