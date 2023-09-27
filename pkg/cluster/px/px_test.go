@@ -25,7 +25,8 @@ var (
 	testClusterName = "pxut"
 )
 
-/**
+/*
+*
 At the moment, the UT only covers deletion of new config maps added as part of PWX-24266
 */
 func TestDeleteAllPXComponents(t *testing.T) {

@@ -18,7 +18,7 @@ GO     := go
 GOENV  := GOOS=linux GOARCH=amd64
 DIR=.
 
-DOCK_BUILD_CNT	:= golang:1.17.13
+DOCK_BUILD_CNT	:= golang:1.20.7
 
 ifndef TAGS
 TAGS := daemon
@@ -134,8 +134,8 @@ deploy: container
 	sudo docker push $(PX_NODE_WIPER_IMG)
 
 docker-build:
-	@echo "Building using docker"
-	docker run --rm -v $(shell pwd):/go/src/github.com/portworx/talisman $(DOCK_BUILD_CNT) \
+	@echo "Building using docker (docker-build)"
+	docker run --privileged=true --rm -v $(shell pwd):/go/src/github.com/portworx/talisman -v $(HOME)/.gitconfig:/root/.gitconfig $(DOCK_BUILD_CNT) \
 		/bin/bash -c "cd /go/src/github.com/portworx/talisman; make all"
 
 

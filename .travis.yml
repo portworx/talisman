@@ -4,10 +4,11 @@ services:
   - docker
 language: go
 go:
-  - 1.13
+  - 1.20.7
 before_install:
   - sudo apt-get update -yq
   - sudo apt-get -o Dpkg::Options::="--force-confnew" install -yq docker-ce
+  - sudo git config --global --add safe.directory /go/src/github.com/portworx/talisman
 script:
   - make docker-build
 after_success:
