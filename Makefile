@@ -134,7 +134,7 @@ deploy: container
 	sudo docker push $(PX_NODE_WIPER_IMG)
 
 docker-build:
-	@echo "Building using docker"
+	@echo "Building using docker (docker-build)"
 	docker run --rm -v $(shell pwd):/go/src/github.com/portworx/talisman -v $(HOME)/.gitconfig:/root/.gitconfig $(DOCK_BUILD_CNT) \
 		/bin/bash -c "cd /go/src/github.com/portworx/talisman; make all"
 
