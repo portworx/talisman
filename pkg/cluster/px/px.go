@@ -7,6 +7,11 @@ import (
 	"strings"
 	"time"
 
+	osd_api "github.com/libopenstorage/openstorage/api"
+	osd_clusterclient "github.com/libopenstorage/openstorage/api/client/cluster"
+	osd_volclient "github.com/libopenstorage/openstorage/api/client/volume"
+	"github.com/libopenstorage/openstorage/cluster"
+	"github.com/libopenstorage/openstorage/volume"
 	"github.com/portworx/kvdb"
 	e2 "github.com/portworx/kvdb/etcd/v2"
 	e3 "github.com/portworx/kvdb/etcd/v3"
@@ -18,11 +23,6 @@ import (
 	"github.com/portworx/sched-ops/task"
 	apiv1beta1 "github.com/portworx/talisman/pkg/apis/portworx/v1beta1"
 	"github.com/portworx/talisman/pkg/k8sutils"
-	osd_api "github.com/pure-px/openstorage/api"
-	osd_clusterclient "github.com/pure-px/openstorage/api/client/cluster"
-	osd_volclient "github.com/pure-px/openstorage/api/client/volume"
-	"github.com/pure-px/openstorage/cluster"
-	"github.com/pure-px/openstorage/volume"
 	"github.com/sirupsen/logrus"
 	apps_api "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -458,7 +458,7 @@ func (ops *pxClusterOps) waitTillPXSharedVolumesDetached(volDriver volume.Volume
 
 	t := func() (interface{}, bool, error) {
 
-		vols, err := volDriver.Inspect(volsToInspect, nil)
+		vols, err := volDriver.Inspect(volsToInspect)
 		if err != nil {
 			return nil, true, err
 		}
