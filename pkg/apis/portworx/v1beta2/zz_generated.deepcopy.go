@@ -39,17 +39,6 @@ func (in *CommonPlacementSpec) DeepCopyInto(out *CommonPlacementSpec) {
 			}
 		}
 	}
-	if in.NamespaceSelector != nil {
-		in, out := &in.NamespaceSelector, &out.NamespaceSelector
-		*out = make([]*v1beta1.LabelSelectorRequirement, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(v1beta1.LabelSelectorRequirement)
-				(*in).DeepCopyInto(*out)
-			}
-		}
-	}
 	return
 }
 

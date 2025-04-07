@@ -68,7 +68,4 @@ type CommonPlacementSpec struct {
 	TopologyKey string `json:"topologyKey,omitempty"`
 	// MatchExpressions is a list of label selector requirements. The requirements are ANDed.
 	MatchExpressions []*v1beta1.LabelSelectorRequirement `json:"matchExpressions,omitempty"`
-	// NamespaceSelector is a list of label selector requirements. The requirements are ANDed.
-	// It defines the scope of the VPS volume rule so that it only matches against volumes from the specified namespaces
-	NamespaceSelector []*v1beta1.LabelSelectorRequirement `json:"namespaceSelector,omitempty"`
 }
