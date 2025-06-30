@@ -77,29 +77,6 @@ github.com/kisielk/errcheck
 github.com/kisielk/errcheck/errcheck
 # github.com/libopenstorage/gossip v0.0.0-20200808224301-d5287c7c8b24
 github.com/libopenstorage/gossip/types
-# github.com/libopenstorage/openstorage v8.0.1-0.20211105030910-665c2f474186+incompatible
-## explicit
-github.com/libopenstorage/openstorage/api
-github.com/libopenstorage/openstorage/api/client
-github.com/libopenstorage/openstorage/api/client/cluster
-github.com/libopenstorage/openstorage/api/client/volume
-github.com/libopenstorage/openstorage/api/errors
-github.com/libopenstorage/openstorage/cluster
-github.com/libopenstorage/openstorage/objectstore
-github.com/libopenstorage/openstorage/osdconfig
-github.com/libopenstorage/openstorage/pkg/auth
-github.com/libopenstorage/openstorage/pkg/clusterdomain
-github.com/libopenstorage/openstorage/pkg/dbg
-github.com/libopenstorage/openstorage/pkg/defaultcontext
-github.com/libopenstorage/openstorage/pkg/diags
-github.com/libopenstorage/openstorage/pkg/grpcutil
-github.com/libopenstorage/openstorage/pkg/job
-github.com/libopenstorage/openstorage/pkg/nodedrain
-github.com/libopenstorage/openstorage/pkg/parser
-github.com/libopenstorage/openstorage/pkg/storagepool
-github.com/libopenstorage/openstorage/schedpolicy
-github.com/libopenstorage/openstorage/secrets
-github.com/libopenstorage/openstorage/volume
 # github.com/moby/spdystream v0.2.0
 github.com/moby/spdystream
 github.com/moby/spdystream/spdy
@@ -136,6 +113,31 @@ github.com/portworx/sched-ops/task
 # github.com/pquerna/cachecontrol v0.0.0-20180517163645-1555304b9b35
 github.com/pquerna/cachecontrol
 github.com/pquerna/cachecontrol/cacheobject
+# github.com/pure-px/openstorage v9.4.47-0.20250630093056-4a3a10bc917d+incompatible
+## explicit
+github.com/pure-px/openstorage/api
+github.com/pure-px/openstorage/api/client
+github.com/pure-px/openstorage/api/client/cluster
+github.com/pure-px/openstorage/api/client/volume
+github.com/pure-px/openstorage/api/errors
+github.com/pure-px/openstorage/cluster
+github.com/pure-px/openstorage/objectstore
+github.com/pure-px/openstorage/osdconfig
+github.com/pure-px/openstorage/pkg/auth
+github.com/pure-px/openstorage/pkg/clusterdomain
+github.com/pure-px/openstorage/pkg/correlation
+github.com/pure-px/openstorage/pkg/dbg
+github.com/pure-px/openstorage/pkg/defaultcontext
+github.com/pure-px/openstorage/pkg/defrag
+github.com/pure-px/openstorage/pkg/diags
+github.com/pure-px/openstorage/pkg/grpcutil
+github.com/pure-px/openstorage/pkg/job
+github.com/pure-px/openstorage/pkg/nodedrain
+github.com/pure-px/openstorage/pkg/schedule
+github.com/pure-px/openstorage/pkg/storagepool
+github.com/pure-px/openstorage/schedpolicy
+github.com/pure-px/openstorage/secrets
+github.com/pure-px/openstorage/volume
 # github.com/sirupsen/logrus v1.8.1
 ## explicit
 github.com/sirupsen/logrus
