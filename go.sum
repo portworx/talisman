@@ -1107,8 +1107,8 @@ github.com/prometheus/procfs v0.6.0/go.mod h1:cz+aTbrPOrUb4q7XlbU9ygM+/jj0fzG6c1
 github.com/prometheus/prometheus v2.9.2+incompatible/go.mod h1:vdLuLLM0uqhLSofrQ7Nev2b/rQUyZ+pkT3zF7LB/i1g=
 github.com/prometheus/tsdb v0.7.1/go.mod h1:qhTCs0VvXwvX/y3TZrWD7rabWM+ijKTux40TwIPHuXU=
 github.com/prometheus/tsdb v0.8.0/go.mod h1:fSI0j+IUQrDd7+ZtR9WKIGtoYAYAJUKcKhYLG25tN4g=
-github.com/pure-px/openstorage v9.4.47-0.20250630093056-4a3a10bc917d+incompatible h1:ph0uUb1rJiwNq2aU8E6kX7/aNfquiYRyfQuS/VzNqN8=
-github.com/pure-px/openstorage v9.4.47-0.20250630093056-4a3a10bc917d+incompatible/go.mod h1:zJEduBHjub/SAjtEXiL3rsLqRNkuz4q2h8Mdbyt4Cho=
+github.com/pure-px/openstorage v9.4.47-0.20250703095035-53a54ca72052+incompatible h1:K63cIJXH0V6UN8HRiw8dg9V7dw5N3arJ8tD1yEr8CRU=
+github.com/pure-px/openstorage v9.4.47-0.20250703095035-53a54ca72052+incompatible/go.mod h1:zJEduBHjub/SAjtEXiL3rsLqRNkuz4q2h8Mdbyt4Cho=
 github.com/quobyte/api v0.1.8/go.mod h1:jL7lIHrmqQ7yh05OJ+eEEdHr0u/kmT1Ff9iHd+4H6VI=
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
 github.com/remyoudompheng/bigfft v0.0.0-20170806203942-52369c62f446/go.mod h1:uYEyJGbgTkfkS4+E/PavXkNJcbFIpEtjt2B0KDQ5+9M=
