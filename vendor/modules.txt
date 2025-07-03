@@ -113,7 +113,7 @@ github.com/portworx/sched-ops/task
 # github.com/pquerna/cachecontrol v0.0.0-20180517163645-1555304b9b35
 github.com/pquerna/cachecontrol
 github.com/pquerna/cachecontrol/cacheobject
-# github.com/pure-px/openstorage v9.4.47-0.20250630093056-4a3a10bc917d+incompatible
+# github.com/pure-px/openstorage v9.4.47-0.20250703095035-53a54ca72052+incompatible
 ## explicit
 github.com/pure-px/openstorage/api
 github.com/pure-px/openstorage/api/client

@@ -6,7 +6,7 @@ require (
 	github.com/kisielk/errcheck v1.5.0
 	github.com/portworx/kvdb v0.0.0-20200723230726-2734b7f40194
 	github.com/portworx/sched-ops v1.20.4-rc1.0.20220525162714-62ad1f4ebae1
-	github.com/pure-px/openstorage v9.4.47-0.20250630093056-4a3a10bc917d+incompatible // taken from relase-9.10
+	github.com/pure-px/openstorage v9.4.47-0.20250703095035-53a54ca72052+incompatible // taken from relase-9.10
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/lint v0.0.0-20201208152925-83fdc39ff7b5
