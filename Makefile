@@ -18,7 +18,7 @@ GO     := go
 GOENV  := GOOS=linux GOARCH=amd64
 DIR=.
 
-DOCK_BUILD_CNT	:= golang:1.21
+DOCK_BUILD_CNT	:= golang:1.23
 
 ifndef TAGS
 TAGS := daemon
