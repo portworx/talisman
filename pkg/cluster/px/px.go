@@ -1371,7 +1371,7 @@ func (ops *pxClusterOps) runPXNodeWiper(pwxHostPathRoot, wiperImage, wiperTag st
 							},
 							ReadinessProbe: &corev1.Probe{
 								InitialDelaySeconds: 120,
-								Handler: corev1.Handler{
+								ProbeHandler: corev1.ProbeHandler{
 									Exec: &corev1.ExecAction{
 										Command: []string{"cat", "/tmp/px-node-wipe-done"},
 									},
@@ -1634,7 +1634,7 @@ func (ops *pxClusterOps) checkAPIDaemonset(namespace string, affinity *v1.Affini
 								ImagePullPolicy: corev1.PullAlways,
 								ReadinessProbe: &corev1.Probe{
 									PeriodSeconds: 10,
-									Handler: v1.Handler{
+									ProbeHandler: v1.ProbeHandler{
 										HTTPGet: &corev1.HTTPGetAction{
 											Host: "127.0.0.1",
 											Path: "/status",
